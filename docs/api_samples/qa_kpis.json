@@ -1,0 +1,55 @@
+{
+  "screen": "qa",
+  "screenId": "SCR-002",
+  "dataMode": "mock",
+  "effectiveAt": "2026-03-14T15:00:00+09:00",
+  "updatedAt": "2026-03-14T15:00:10+09:00",
+  "kpis": {
+    "items": [
+      {
+        "key": "qa_defect_rate",
+        "label": "현재 불량률",
+        "value": 4.2,
+        "unit": "%",
+        "sourceType": "derived"
+      },
+      {
+        "key": "qa_recheck",
+        "label": "재검 필요 수량",
+        "value": 24,
+        "unit": "건",
+        "sourceType": "derived"
+      },
+      {
+        "key": "qa_summary",
+        "label": "검사 현황 요약",
+        "value": {
+          "totalInspected": 8420,
+          "okCount": 8065,
+          "ngCount": 355
+        },
+        "sourceType": "actual",
+        "displayMode": "group-summary"
+      }
+    ]
+  },
+  "insights": {
+    "items": [
+      {
+        "key": "qa_alert_status",
+        "label": "품질 경보",
+        "value": "warning",
+        "status": "warning",
+        "severity": "warning",
+        "sourceType": "derived"
+      },
+      {
+        "key": "qa_pattern_hint",
+        "label": "패턴 탐지",
+        "value": "라인 D 급증 구간 감지",
+        "sourceType": "predicted",
+        "reasonSummary": "동일 모델 반복 패턴"
+      }
+    ]
+  }
+}

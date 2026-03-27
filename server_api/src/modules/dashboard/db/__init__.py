@@ -1,0 +1,2 @@
+"""Dashboard DB models package."""
+

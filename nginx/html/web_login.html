@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Smart Factory Platform — 로그인</title>
+  <!--
+    이 페이지는 브라우저 기반 web_dashboard 로그인 진입점이다.
+    login.html은 PyQt/on-device 흐름에서 따로 사용한다.
+  -->
+  <style>
+    /* 인증 여부를 판별하는 아주 짧은 순간에 로그인 화면이 번쩍 보였다가
+       다시 리다이렉트되는 현상을 막기 위한 보호용 스타일이다.
+       JS가 세션 확인을 끝내고 나면 auth-checking 클래스를 제거한다. */
+    html.auth-checking body {
+      visibility: hidden;
+    }
+  </style>
+  <script>
+    (function () {
+      /* 페이지가 뜨자마자 먼저 숨김 상태로 두고,
+         이미 로그인된 사용자인지 확인한 다음에
+         로그인 화면을 보여줄지 / 대시보드로 보낼지 결정한다. */
+      document.documentElement.classList.add('auth-checking');
+
+      try {
+        /* web_dashboard 로그인은 localStorage + sessionStorage 조합으로 관리한다.
+           - localStorage: 로그인 여부와 최소 사용자 정보
+           - sessionStorage: 현재 브라우저 탭에만 유지되는 access token
+           둘 다 있어야 유효한 웹 세션으로 본다. */
+        const raw = localStorage.getItem('dashboard_auth_v1');
+        const auth = raw ? JSON.parse(raw) : null;
+        const accessToken = sessionStorage.getItem('sfp_access_token');
+        if (auth && auth.loggedIn === true && accessToken) {
+          // 이미 인증된 사용자는 로그인 페이지에 머물 필요가 없으므로 즉시 대시보드로 보낸다.
+          window.location.replace('/web_dashboard.html');
+          return;
+        }
+      } catch (_error) {
+        // 세션 파싱 실패 시에는 로그인 화면을 그대로 보여준다.
+      }
+
+      window.addEventListener('DOMContentLoaded', function () {
+        document.documentElement.classList.remove('auth-checking');
+      });
+    })();
+  </script>
+  <link rel="preconnect" href="https://fonts.googleapis.com"/>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500&family=DM+Mono:wght@400;500&family=Noto+Sans+KR:wght@300;400;500&display=swap" rel="stylesheet"/>
+  <link rel="stylesheet" href="css/web_login/web_login_style.css"/>
+</head>
+<body>
+  <!-- web_dashboard 로그인 루트: web_login.js가 id 기반으로 강하게 묶여 있으니 구조 변경 시 식별자를 함께 맞춰야 한다. -->
+  <div class="wrap">
+    <div class="card">
+
+      <!-- 브랜드 / 서비스 식별 -->
+      <div class="company-row">
+        <div class="lmark">
+          <svg viewBox="0 0 14 14" fill="none">
+            <rect x="1" y="7" width="3" height="6" fill="white" opacity=".4"/>
+            <rect x="5.5" y="4" width="3" height="9" fill="white" opacity=".7"/>
+            <rect x="10" y="1" width="3" height="12" fill="white"/>
+          </svg>
+        </div>
+        <span class="company-name">Smart Factory Platform</span>
+      </div>
+
+      <!-- 로그인 헤더 -->
+      <p class="eyebrow">SIGN IN</p>
+      <h1 class="form-title">로그인</h1>
+
+      <!-- 로그인 방식 전환 탭 -->
+      <div class="tab-wrap">
+        <!-- data-tab 값은 web_login.js의 switchTab() 분기 키로 사용된다. -->
+        <button class="tab active" id="tab-id" type="button" data-tab="id">ID / PW로 로그인</button>
+        <button class="tab" id="tab-face" type="button" data-tab="face">Face ID로 로그인</button>
+      </div>
+
+      <!-- 아이디/비밀번호 로그인 패널 -->
+      <div class="id-panel" id="panel-id">
+        <!-- 이 영역은 전통적인 사원번호/비밀번호 로그인용 폼 역할을 한다.
+             별도 <form> 태그 대신 JS가 버튼 클릭과 Enter 입력을 직접 처리한다. -->
+        <div class="field">
+          <label class="field-label" for="emp-id">사원번호</label>
+          <div class="iwrap">
+            <span class="iico">
+              <svg viewBox="0 0 14 14" fill="none">
+                <circle cx="7" cy="4.5" r="2.8" stroke="#CBD5E1" stroke-width="1"/>
+                <path d="M1.5 12.5c0-3 2.5-4.5 5.5-4.5s5.5 1.5 5.5 4.5" stroke="#CBD5E1" stroke-width="1" stroke-linecap="round"/>
+              </svg>
+            </span>
+            <input class="ginput" id="emp-id" type="text" placeholder="아이디를 입력하세요" autocomplete="username"/>
+          </div>
+        </div>
+        <div class="field">
+          <label class="field-label" for="password">비밀번호</label>
+          <div class="iwrap">
+            <span class="iico">
+              <svg viewBox="0 0 14 14" fill="none">
+                <rect x="2" y="6" width="10" height="7" rx="1" stroke="#CBD5E1" stroke-width="1"/>
+                <path d="M4.5 6V4.5a2.5 2.5 0 015 0V6" stroke="#CBD5E1" stroke-width="1"/>
+                <circle cx="7" cy="9.5" r="1" fill="#CBD5E1"/>
+              </svg>
+            </span>
+            <input class="ginput" id="password" type="password" placeholder="비밀번호를 입력하세요" autocomplete="current-password"/>
+          </div>
+        </div>
+        <div class="row-middle">
+          <label class="save-id">
+            <input type="checkbox" id="remember"/>
+            <span>아이디 저장</span>
+          </label>
+          <a class="forgot" href="#">비밀번호를 잊으셨나요?</a>
+        </div>
+        <button class="btn-login" id="btn-login">로그인</button>
+      </div>
+
+      <!-- Face ID 패널: 카메라 stream이 연결되므로 display 제어는 JS 클래스 토글 기준으로 유지한다. -->
+      <div class="face-panel" id="panel-face">
+        <!-- 사원번호는 선택 입력이다.
+             입력하면 해당 사용자 기준 1:1 검증,
+             비워두면 등록된 얼굴 전체 대상 1:N 매칭 흐름으로 넘어간다. -->
+        <div class="field face-field">
+          <label class="field-label" for="face-employee-no">사원번호 선택 입력</label>
+          <div class="iwrap">
+            <span class="iico">
+              <svg viewBox="0 0 14 14" fill="none">
+                <circle cx="7" cy="4.5" r="2.8" stroke="#CBD5E1" stroke-width="1"/>
+                <path d="M1.5 12.5c0-3 2.5-4.5 5.5-4.5s5.5 1.5 5.5 4.5" stroke="#CBD5E1" stroke-width="1" stroke-linecap="round"/>
+              </svg>
+            </span>
+            <input class="ginput" id="face-employee-no" type="text" placeholder="비워두면 등록된 얼굴 전체에서 비교합니다" autocomplete="username"/>
+          </div>
+        </div>
+        <video id="face-video" class="face-video" autoplay muted playsinline></video>
+        <!-- video 엘리먼트는 단순 미리보기뿐 아니라,
+             JS가 현재 프레임을 canvas에 캡처해 base64 이미지로 전송하는 원본 입력이 된다. -->
+        <div class="face-actions">
+          <button class="face-btn face-btn--ghost" id="face-start-btn" type="button">카메라 시작</button>
+          <button class="face-btn face-btn--ghost" id="face-stop-btn" type="button">카메라 중지</button>
+        </div>
+        <button class="face-btn face-btn--primary" id="face-login-btn" type="button">얼굴로 로그인</button>
+        <p class="face-status" id="face-status">얼굴을 인증해주세요</p>
+        <p class="face-desc" id="face-desc">InsightFace가 자동으로 인식합니다.</p>
+      </div>
+
+    </div>
+
+    <!-- 하단 서비스 상태 문구 -->
+    <div class="bottom-note">
+      <span class="bdot"></span>
+      시스템 정상 운영 중 · v2.4.1 · INTRANET ONLY · bcrypt + JWT · AES-256
+    </div>
+  </div>
+
+  <!-- web_dashboard 로그인 전용 스크립트 -->
+  <script src="js/web_login/web_login.js"></script>
+</body>
+</html>

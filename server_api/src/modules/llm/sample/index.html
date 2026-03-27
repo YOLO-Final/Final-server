@@ -1,0 +1,126 @@
+﻿<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bao Chat</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><circle cx='50' cy='55' r='40' fill='white' stroke='black' stroke-width='4'/><circle cx='25' cy='25' r='15' fill='black'/><circle cx='75' cy='25' r='15' fill='black'/><ellipse cx='35' cy='50' rx='10' ry='12' fill='black'/><ellipse cx='65' cy='50' rx='10' ry='12' fill='black'/><circle cx='35' cy='48' r='3' fill='white'/><circle cx='65' cy='48' r='3' fill='white'/><ellipse cx='50' cy='65' rx='6' ry='4' fill='black'/></svg>">
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="./static/css/index.css?v=20260317-citation">
+</head>
+<body>
+<header class="site-header">
+    <div class="site-left">
+        <svg class="site-logo" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+            <circle cx="50" cy="55" r="40" fill="white" stroke="black" stroke-width="4"/>
+            <circle cx="25" cy="25" r="15" fill="black"/>
+            <circle cx="75" cy="25" r="15" fill="black"/>
+            <ellipse cx="35" cy="50" rx="10" ry="12" fill="black"/>
+            <ellipse cx="65" cy="50" rx="10" ry="12" fill="black"/>
+            <circle cx="35" cy="48" r="3" fill="white"/>
+            <circle cx="65" cy="48" r="3" fill="white"/>
+            <ellipse cx="50" cy="65" rx="6" ry="4" fill="black"/>
+        </svg>
+        <span class="site-title">Bao Chat</span>
+    </div>
+    <span class="status"><span class="status-dot"></span>Online</span>
+</header>
+
+<aside class="mini-rail">
+    <div class="rail-top">
+        <button id="railMenuBtn" class="rail-icon-btn" type="button" title="메뉴" aria-label="메뉴 열기">☰</button>
+        <button id="railNewChatBtn" class="rail-icon-btn" type="button" title="새 채팅" aria-label="새 채팅">✎</button>
+    </div>
+    <div class="rail-bottom">
+        <button id="railSettingsBtn" class="rail-icon-btn" type="button" title="설정" aria-label="설정 열기">⚙</button>
+    </div>
+</aside>
+<div id="railSettingsPopover" class="rail-popover">
+    <div class="title">Menu Contents</div>
+    <div class="row">
+        <select id="quickThemeSelect" title="Quick Theme">
+            <option value="light">Theme: Light</option>
+            <option value="dark">Theme: Dark</option>
+            <option value="mint">Theme: Mint</option>
+        </select>
+        <select id="quickProviderSelect" title="Quick Model Provider">
+            <option value="openai">OpenAI</option>
+            <option value="gemini">Gemini</option>
+            <option value="vllm_fast">vLLM Fast</option>
+            <option value="vllm">vLLM</option>
+        </select>
+        <label><input type="checkbox" id="quickWebSearchToggle"> Web Search</label>
+        <label><input type="checkbox" id="quickTtsToggle"> TTS</label>
+        <label><input type="checkbox" id="quickSttToggle" checked> STT</label>
+    </div>
+    <button id="quickOpenSidebarBtn" type="button">전체 설정 열기</button>
+</div>
+
+<div id="sidebarBackdrop" class="sidebar-backdrop"></div>
+<div id="sidebarContainer" class="sidebar-container">
+    <aside class="sidebar">
+        <div class="side-group">
+            <button id="newChatBtn" type="button">새 채팅</button>
+            <button id="settingsToggleBtn" class="side-toggle-btn" type="button">
+                <span class="icon">⚙</span>설정
+            </button>
+            <div id="settingsPanel" class="settings-panel">
+                <select id="themeSelect" title="Theme">
+                    <option value="light">Theme: Light</option>
+                    <option value="dark">Theme: Dark</option>
+                    <option value="mint">Theme: Mint</option>
+                </select>
+                <select id="providerSelect" title="Model Provider">
+                    <option value="openai">OpenAI</option>
+                    <option value="gemini">Gemini</option>
+                    <option value="vllm_fast">vLLM Fast</option>
+                    <option value="vllm">vLLM</option>
+                </select>
+                <!-- <select id="empathySelect" title="Empathy Level">
+                    <option value="balanced">공감: 균형</option>
+                    <option value="high">공감: 높음</option>
+                    <option value="low">공감: 낮음</option>
+                </select> -->
+                <label class="inline"><input type="checkbox" id="webSearchToggle"> Web Search</label>
+                <label class="inline"><input type="checkbox" id="ttsToggle" checked> TTS</label>
+                <label class="switch-row" for="sttToggle">
+                    <span>음성 인식</span>
+                    <span class="switch">
+                        <input type="checkbox" id="sttToggle" checked>
+                        <span class="switch-slider"></span>
+                    </span>
+                </label>
+                <button id="resetMemoryBtn" type="button">Memory Reset</button>
+                <label for="fileInput" style="cursor:pointer;">TXT 업로드</label>
+                <input type="file" id="fileInput" accept=".txt" style="display:none;" onchange="uploadFile()">
+            </div>
+            <div class="side-divider"></div>
+            <div class="side-title">채팅</div>
+            <div id="topicHistory" class="history-list"></div>
+            <button id="clearHistoryBtn" type="button">전체 기록 삭제</button>
+        </div>
+    </aside>
+</div>
+
+<main class="page-content">
+    <div class="app-container">
+    <section class="main-panel">
+        <div id="chat-box">
+            <div id="welcome-screen"><h2>무엇을 도와드릴까요?</h2></div>
+        </div>
+
+        <div class="input-wrapper">
+            <div class="input-container">
+                <button id="micBtn" class="icon-btn" title="음성 입력">🎤</button>
+                <button id="stopTtsBtn" class="icon-btn" title="음성 중지">⏹</button>
+                <input type="text" id="messageInput" placeholder="질문을 입력하세요..." autocomplete="off">
+                <button id="sendBtn" class="btn-icon" onclick="sendMessage()" style="color: #1a73e8;">➤</button>
+            </div>
+        </div>
+    </section>
+    </div>
+</main>
+
+<script src="./static/js/index.js?v=20260317-citation"></script>
+</body>
+</html>

@@ -1,0 +1,132 @@
+direction: right
+
+vars: {
+  user_fill: "#F7E7C6"
+  ui_fill: "#F3C24D"
+  api_fill: "#5C7CC4"
+  svc_fill: "#6E90D8"
+  ai_fill: "#4767B1"
+  plugin_fill: "#F2C14E"
+  store_fill: "#6B56B8"
+  db_fill: "#4CAF60"
+  text_light: "#FFFFFF"
+}
+
+title: "사용자 흐름으로 보는 AI 상담 구조"
+
+user: "사용자" {
+  shape: person
+  style.fill: ${user_fill}
+}
+
+ui: "프론트엔드 화면" {
+  style.fill: ${ui_fill}
+}
+
+api: "FastAPI 요청 처리" {
+  style.fill: ${api_fill}
+  style.font-color: ${text_light}
+}
+
+services: "기능별 서비스" {
+  style.fill: ${api_fill}
+  style.font-color: ${text_light}
+  direction: down
+
+  chat: "대화 처리 서비스" {
+    style.fill: ${svc_fill}
+    style.font-color: ${text_light}
+  }
+
+  media: "음성·이미지 서비스" {
+    style.fill: ${svc_fill}
+    style.font-color: ${text_light}
+  }
+
+  recommend: "추천 질문 서비스" {
+    style.fill: ${svc_fill}
+    style.font-color: ${text_light}
+  }
+
+  knowledge: "지식 관리 서비스" {
+    style.fill: ${svc_fill}
+    style.font-color: ${text_light}
+  }
+}
+
+ai: "AI 처리" {
+  style.fill: ${api_fill}
+  style.font-color: ${text_light}
+  direction: down
+
+  answer: "AI 응답 생성" {
+    style.fill: ${ai_fill}
+    style.font-color: ${text_light}
+  }
+
+  openai: "OpenAI GPT-4o-mini" {
+    style.fill: ${plugin_fill}
+  }
+
+  gemini: "Google Gemini 2.0 Flash" {
+    style.fill: ${plugin_fill}
+  }
+
+  web: "Serper·Tavily 웹 검색" {
+    style.fill: ${plugin_fill}
+  }
+
+  faiss: "FAISS 검색" {
+    style.fill: ${plugin_fill}
+  }
+}
+
+storage: "저장소" {
+  style.fill: ${api_fill}
+  style.font-color: ${text_light}
+  direction: down
+
+  files: "로컬 파일 저장소\nPDF·TXT·이미지" {
+    shape: cylinder
+    style.fill: ${db_fill}
+    style.font-color: ${text_light}
+  }
+
+  memory: "프로세스 메모리" {
+    style.fill: ${store_fill}
+    style.font-color: ${text_light}
+  }
+
+  postgres: "PostgreSQL" {
+    shape: cylinder
+    style.fill: ${db_fill}
+    style.font-color: ${text_light}
+  }
+}
+
+result: "응답 반환" {
+  style.fill: ${ui_fill}
+}
+
+user -> ui: 질문·음성 입력
+ui -> api: 요청 전달
+api -> services: 기능 분기
+services -> ai.answer: AI 처리 요청
+ai.answer -> result: 답변 생성
+result -> ui: 화면에 표시
+
+ai.openai -> ai.answer: 대화 모델
+ai.gemini -> ai.answer: 보조 모델
+ai.web -> ai.answer: 최신 정보 검색
+ai.faiss -> ai.answer: 지식 검색
+
+storage.files -> services.knowledge: 지식 읽기
+storage.files -> ai.faiss: 문서 기반 검색
+storage.memory -> services.chat: 대화 상태
+storage.memory -> ai.answer: 세션·캐시
+storage.postgres -> api: 업무 데이터 조회
+
+style: {
+  font: "Pretendard"
+  text-transform: none
+}

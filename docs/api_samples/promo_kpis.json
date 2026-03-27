@@ -1,0 +1,35 @@
+{
+  "screen": "promo",
+  "screenId": "SCR-004",
+  "dataMode": "mock",
+  "effectiveAt": "2026-03-14T15:00:00+09:00",
+  "updatedAt": "2026-03-14T15:00:10+09:00",
+  "kpis": {
+    "items": [
+      {
+        "key": "promo_total",
+        "label": "오늘 총 생산량",
+        "value": 13200,
+        "unit": "pcs",
+        "sourceType": "actual"
+      },
+      {
+        "key": "promo_achievement",
+        "label": "목표 달성률",
+        "value": 66.0,
+        "unit": "%",
+        "sourceType": "derived"
+      },
+      {
+        "key": "promo_yield",
+        "label": "당일 양품률",
+        "value": 95.8,
+        "unit": "%",
+        "sourceType": "derived"
+      }
+    ]
+  },
+  "insights": {
+    "items": []
+  }
+}

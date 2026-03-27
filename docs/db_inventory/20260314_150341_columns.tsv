@@ -1,0 +1,75 @@
+defect_logs	1	defect_id	integer	NO	nextval('defect_logs_defect_id_seq'::regclass)
+defect_logs	2	line_id	integer	NO	
+defect_logs	3	model_id	character varying	NO	
+defect_logs	4	detected_by	character varying	YES	
+defect_logs	5	defect_class	character varying	YES	
+defect_logs	6	inspection_qty	integer	YES	
+defect_logs	7	good_qty	integer	YES	
+defect_logs	8	recorded_at	timestamp without time zone	YES	
+defect_logs	9	defect_qty	integer	YES	
+defect_type	1	class_id	character varying	YES	
+defect_type	2	class_name	character varying	YES	
+defect_type	3	desc	character varying	YES	
+environment_logs	1	env_id	integer	NO	nextval('environment_logs_env_id_seq'::regclass)
+environment_logs	2	line_id	integer	YES	
+environment_logs	3	temperature	double precision	YES	
+environment_logs	4	humidity	double precision	YES	
+environment_logs	5	recorded_at	timestamp without time zone	YES	
+equipment	1	equipment_id	integer	NO	nextval('equipment_equipment_id_seq'::regclass)
+equipment	2	equipment_name	character varying	YES	
+equipment	3	status	character varying	YES	
+equipment	4	last_checked_at	timestamp without time zone	YES	
+equipment	5	line_id	integer	YES	
+face_embedding_table	1	employee_no	character varying	NO	
+face_embedding_table	2	embedding_json	character varying	NO	
+face_embedding_table	3	embedding_id	integer	NO	nextval('face_embedding_table_embedding_id_seq'::regclass)
+items	1	id	integer	NO	nextval('items_id_seq'::regclass)
+items	2	title	character varying	NO	
+items	3	description	character varying	YES	
+lines	1	line_id	integer	NO	nextval('lines_line_id_seq'::regclass)
+lines	2	line_name	character varying	YES	
+lines	3	status	character varying	YES	
+lines	4	current_model_id	character varying	YES	
+ml_predictions	1	pred_id	integer	NO	nextval('ml_predictions_pred_id_seq'::regclass)
+ml_predictions	2	line_id	integer	NO	nextval('ml_predictions_line_id_seq'::regclass)
+ml_predictions	3	pred_type	character varying	YES	
+ml_predictions	4	predicted_value	double precision	YES	
+ml_predictions	5	predicted_at	timestamp without time zone	YES	
+ml_predictions	6	valid_until	timestamp without time zone	YES	
+notifications	1	noti_id	integer	NO	nextval('notifications_noti_id_seq'::regclass)
+notifications	2	line_id	integer	YES	
+notifications	3	target_role	character varying	YES	
+notifications	4	level	integer	YES	
+notifications	5	message	character varying	YES	
+notifications	6	triggered_at	timestamp without time zone	YES	
+notifications	7	expires_at	timestamp without time zone	YES	
+notifications	8	is_dismissed	boolean	YES	
+product_models	2	model_name	character varying	YES	
+product_models	3	alert_threshold	double precision	YES	
+product_models	4	danger_threshold	double precision	YES	
+product_models	5	unit	character varying	YES	
+product_models	6	model_id	character varying	NO	
+production_logs	1	log_id	bigint	NO	nextval('production_logs_log_id_seq'::regclass)
+production_logs	2	line_id	integer	NO	
+production_logs	3	model_id	character varying	NO	
+production_logs	4	produced_qty	integer	YES	
+user_table	1	employee_no	character varying	NO	
+user_table	2	password_hash	character varying	YES	
+user_table	3	id_active	boolean	YES	
+user_table	4	id_locked	boolean	YES	
+user_table	5	login_fail_count	bigint	YES	
+user_table	6	token_version	bigint	YES	
+user_table	7	join_date	timestamp without time zone	YES	
+user_table	8	last_login	timestamp without time zone	YES	
+user_table	9	role	character varying	YES	
+user_table	10	name	character varying	YES	
+user_table	12	line_id	integer	NO	nextval('user_table_line_id_seq'::regclass)
+vector_table	1	employee_no	character varying	YES	
+vector_table	2	face_embedding	tsvector	YES	
+vision_result	1	id	integer	YES	
+vision_result	2	request_id	character varying	YES	
+vision_result	3	image_path	character varying	YES	
+vision_result	4	result_status	character varying	YES	
+vision_result	5	defect_type	character varying	YES	
+vision_result	6	confidence	double precision	YES	
+vision_result	7	created_at	date	YES	

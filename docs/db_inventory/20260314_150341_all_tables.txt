@@ -1,0 +1,140 @@
+                           List of relations
+       Schema       |           Name           |    Type     |  Owner   
+--------------------+--------------------------+-------------+----------
+ information_schema | sql_features             | table       | FP_ADMIN
+ information_schema | sql_implementation_info  | table       | FP_ADMIN
+ information_schema | sql_parts                | table       | FP_ADMIN
+ information_schema | sql_sizing               | table       | FP_ADMIN
+ pg_catalog         | pg_aggregate             | table       | FP_ADMIN
+ pg_catalog         | pg_am                    | table       | FP_ADMIN
+ pg_catalog         | pg_amop                  | table       | FP_ADMIN
+ pg_catalog         | pg_amproc                | table       | FP_ADMIN
+ pg_catalog         | pg_attrdef               | table       | FP_ADMIN
+ pg_catalog         | pg_attribute             | table       | FP_ADMIN
+ pg_catalog         | pg_auth_members          | table       | FP_ADMIN
+ pg_catalog         | pg_authid                | table       | FP_ADMIN
+ pg_catalog         | pg_cast                  | table       | FP_ADMIN
+ pg_catalog         | pg_class                 | table       | FP_ADMIN
+ pg_catalog         | pg_collation             | table       | FP_ADMIN
+ pg_catalog         | pg_constraint            | table       | FP_ADMIN
+ pg_catalog         | pg_conversion            | table       | FP_ADMIN
+ pg_catalog         | pg_database              | table       | FP_ADMIN
+ pg_catalog         | pg_db_role_setting       | table       | FP_ADMIN
+ pg_catalog         | pg_default_acl           | table       | FP_ADMIN
+ pg_catalog         | pg_depend                | table       | FP_ADMIN
+ pg_catalog         | pg_description           | table       | FP_ADMIN
+ pg_catalog         | pg_enum                  | table       | FP_ADMIN
+ pg_catalog         | pg_event_trigger         | table       | FP_ADMIN
+ pg_catalog         | pg_extension             | table       | FP_ADMIN
+ pg_catalog         | pg_foreign_data_wrapper  | table       | FP_ADMIN
+ pg_catalog         | pg_foreign_server        | table       | FP_ADMIN
+ pg_catalog         | pg_foreign_table         | table       | FP_ADMIN
+ pg_catalog         | pg_index                 | table       | FP_ADMIN
+ pg_catalog         | pg_inherits              | table       | FP_ADMIN
+ pg_catalog         | pg_init_privs            | table       | FP_ADMIN
+ pg_catalog         | pg_language              | table       | FP_ADMIN
+ pg_catalog         | pg_largeobject           | table       | FP_ADMIN
+ pg_catalog         | pg_largeobject_metadata  | table       | FP_ADMIN
+ pg_catalog         | pg_namespace             | table       | FP_ADMIN
+ pg_catalog         | pg_opclass               | table       | FP_ADMIN
+ pg_catalog         | pg_operator              | table       | FP_ADMIN
+ pg_catalog         | pg_opfamily              | table       | FP_ADMIN
+ pg_catalog         | pg_parameter_acl         | table       | FP_ADMIN
+ pg_catalog         | pg_partitioned_table     | table       | FP_ADMIN
+ pg_catalog         | pg_policy                | table       | FP_ADMIN
+ pg_catalog         | pg_proc                  | table       | FP_ADMIN
+ pg_catalog         | pg_publication           | table       | FP_ADMIN
+ pg_catalog         | pg_publication_namespace | table       | FP_ADMIN
+ pg_catalog         | pg_publication_rel       | table       | FP_ADMIN
+ pg_catalog         | pg_range                 | table       | FP_ADMIN
+ pg_catalog         | pg_replication_origin    | table       | FP_ADMIN
+ pg_catalog         | pg_rewrite               | table       | FP_ADMIN
+ pg_catalog         | pg_seclabel              | table       | FP_ADMIN
+ pg_catalog         | pg_sequence              | table       | FP_ADMIN
+ pg_catalog         | pg_shdepend              | table       | FP_ADMIN
+ pg_catalog         | pg_shdescription         | table       | FP_ADMIN
+ pg_catalog         | pg_shseclabel            | table       | FP_ADMIN
+ pg_catalog         | pg_statistic             | table       | FP_ADMIN
+ pg_catalog         | pg_statistic_ext         | table       | FP_ADMIN
+ pg_catalog         | pg_statistic_ext_data    | table       | FP_ADMIN
+ pg_catalog         | pg_subscription          | table       | FP_ADMIN
+ pg_catalog         | pg_subscription_rel      | table       | FP_ADMIN
+ pg_catalog         | pg_tablespace            | table       | FP_ADMIN
+ pg_catalog         | pg_transform             | table       | FP_ADMIN
+ pg_catalog         | pg_trigger               | table       | FP_ADMIN
+ pg_catalog         | pg_ts_config             | table       | FP_ADMIN
+ pg_catalog         | pg_ts_config_map         | table       | FP_ADMIN
+ pg_catalog         | pg_ts_dict               | table       | FP_ADMIN
+ pg_catalog         | pg_ts_parser             | table       | FP_ADMIN
+ pg_catalog         | pg_ts_template           | table       | FP_ADMIN
+ pg_catalog         | pg_type                  | table       | FP_ADMIN
+ pg_catalog         | pg_user_mapping          | table       | FP_ADMIN
+ pg_toast           | pg_toast_1213            | TOAST table | FP_ADMIN
+ pg_toast           | pg_toast_1247            | TOAST table | FP_ADMIN
+ pg_toast           | pg_toast_1255            | TOAST table | FP_ADMIN
+ pg_toast           | pg_toast_1260            | TOAST table | FP_ADMIN
+ pg_toast           | pg_toast_1262            | TOAST table | FP_ADMIN
+ pg_toast           | pg_toast_13457           | TOAST table | FP_ADMIN
+ pg_toast           | pg_toast_13462           | TOAST table | FP_ADMIN
+ pg_toast           | pg_toast_13467           | TOAST table | FP_ADMIN
+ pg_toast           | pg_toast_13472           | TOAST table | FP_ADMIN
+ pg_toast           | pg_toast_1417            | TOAST table | FP_ADMIN
+ pg_toast           | pg_toast_1418            | TOAST table | FP_ADMIN
+ pg_toast           | pg_toast_16410           | TOAST table | FP_ADMIN
+ pg_toast           | pg_toast_16417           | TOAST table | FP_ADMIN
+ pg_toast           | pg_toast_16461           | TOAST table | FP_ADMIN
+ pg_toast           | pg_toast_16478           | TOAST table | FP_ADMIN
+ pg_toast           | pg_toast_16483           | TOAST table | FP_ADMIN
+ pg_toast           | pg_toast_16494           | TOAST table | FP_ADMIN
+ pg_toast           | pg_toast_16502           | TOAST table | FP_ADMIN
+ pg_toast           | pg_toast_16508           | TOAST table | FP_ADMIN
+ pg_toast           | pg_toast_16525           | TOAST table | FP_ADMIN
+ pg_toast           | pg_toast_16548           | TOAST table | FP_ADMIN
+ pg_toast           | pg_toast_16566           | TOAST table | FP_ADMIN
+ pg_toast           | pg_toast_16576           | TOAST table | FP_ADMIN
+ pg_toast           | pg_toast_2328            | TOAST table | FP_ADMIN
+ pg_toast           | pg_toast_2396            | TOAST table | FP_ADMIN
+ pg_toast           | pg_toast_2600            | TOAST table | FP_ADMIN
+ pg_toast           | pg_toast_2604            | TOAST table | FP_ADMIN
+ pg_toast           | pg_toast_2606            | TOAST table | FP_ADMIN
+ pg_toast           | pg_toast_2609            | TOAST table | FP_ADMIN
+ pg_toast           | pg_toast_2612            | TOAST table | FP_ADMIN
+ pg_toast           | pg_toast_2615            | TOAST table | FP_ADMIN
+ pg_toast           | pg_toast_2618            | TOAST table | FP_ADMIN
+ pg_toast           | pg_toast_2619            | TOAST table | FP_ADMIN
+ pg_toast           | pg_toast_2620            | TOAST table | FP_ADMIN
+ pg_toast           | pg_toast_2964            | TOAST table | FP_ADMIN
+ pg_toast           | pg_toast_3079            | TOAST table | FP_ADMIN
+ pg_toast           | pg_toast_3118            | TOAST table | FP_ADMIN
+ pg_toast           | pg_toast_3256            | TOAST table | FP_ADMIN
+ pg_toast           | pg_toast_3350            | TOAST table | FP_ADMIN
+ pg_toast           | pg_toast_3381            | TOAST table | FP_ADMIN
+ pg_toast           | pg_toast_3394            | TOAST table | FP_ADMIN
+ pg_toast           | pg_toast_3429            | TOAST table | FP_ADMIN
+ pg_toast           | pg_toast_3456            | TOAST table | FP_ADMIN
+ pg_toast           | pg_toast_3466            | TOAST table | FP_ADMIN
+ pg_toast           | pg_toast_3592            | TOAST table | FP_ADMIN
+ pg_toast           | pg_toast_3596            | TOAST table | FP_ADMIN
+ pg_toast           | pg_toast_3600            | TOAST table | FP_ADMIN
+ pg_toast           | pg_toast_6000            | TOAST table | FP_ADMIN
+ pg_toast           | pg_toast_6100            | TOAST table | FP_ADMIN
+ pg_toast           | pg_toast_6106            | TOAST table | FP_ADMIN
+ pg_toast           | pg_toast_6243            | TOAST table | FP_ADMIN
+ pg_toast           | pg_toast_826             | TOAST table | FP_ADMIN
+ public             | defect_logs              | table       | FP_ADMIN
+ public             | defect_type              | table       | FP_ADMIN
+ public             | environment_logs         | table       | FP_ADMIN
+ public             | equipment                | table       | FP_ADMIN
+ public             | face_embedding_table     | table       | FP_ADMIN
+ public             | items                    | table       | FP_ADMIN
+ public             | lines                    | table       | FP_ADMIN
+ public             | ml_predictions           | table       | FP_ADMIN
+ public             | notifications            | table       | FP_ADMIN
+ public             | product_models           | table       | FP_ADMIN
+ public             | production_logs          | table       | FP_ADMIN
+ public             | prompt_permission_list   | table       | FP_ADMIN
+ public             | user_table               | table       | FP_ADMIN
+ public             | vector_table             | table       | FP_ADMIN
+ public             | vision_result            | table       | FP_ADMIN
+(135 rows)
+

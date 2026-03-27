@@ -1,0 +1,72 @@
+NotebookLM 업로드용 필수 파일 목록
+목적: PM용 LLM 모듈 보고서 작성에 직접 필요한 핵심 근거만 모은다.
+
+1)
+파일 경로: /home/orugu/Docker/Final_project_rss/server_api/src/main.py
+왜 이 분류에 들어가는지: 전체 FastAPI 앱에 LLM 모듈이 어떻게 포함되는지 보여 주는 최상위 진입점이다.
+활용 목적: 서비스 내 위치, API 진입 경로 설명.
+실제 존재 여부: 확인됨
+짧은 비고: PostgreSQL 초기화 코드가 보여도 LLM 직접 저장 근거는 아님.
+
+2)
+파일 경로: /home/orugu/Docker/Final_project_rss/server_api/src/api/v1/router.py
+왜 이 분류에 들어가는지: /api/v1 하위에서 LLM 라우터가 어떤 위치를 차지하는지 보여 준다.
+활용 목적: 전체 서비스 모듈 맵, 라우팅 경계 설명.
+실제 존재 여부: 확인됨
+짧은 비고: 다른 모듈과 나란히 등록된 구조 확인용.
+
+3)
+파일 경로: /home/orugu/Docker/Final_project_rss/server_api/src/modules/llm/router.py
+왜 이 분류에 들어가는지: LLM 모듈 API 표면과 추천 질문 경계를 확정한다.
+활용 목적: LLM API 범위 요약.
+실제 존재 여부: 확인됨
+짧은 비고: 운영 사용 여부까지는 이 파일만으로 판단 불가.
+
+4)
+파일 경로: /home/orugu/Docker/Final_project_rss/server_api/src/modules/llm/llm_chat_api.py
+왜 이 분류에 들어가는지: 채팅, 메모리, 지식, 업로드, 웹 진단 등 핵심 API가 모여 있다.
+활용 목적: 질문 처리 흐름, 지식 관리 경계, 메모리 경계 설명.
+실제 존재 여부: 확인됨
+짧은 비고: 구현 존재와 운영 연계는 분리해서 봐야 함.
+
+5)
+파일 경로: /home/orugu/Docker/Final_project_rss/server_api/src/modules/llm/services/knowledge_service.py
+왜 이 분류에 들어가는지: 문서 적재, OCR, chunking, FAISS 조건부 사용 여부를 보여 주는 핵심 RAG 근거다.
+활용 목적: 문서 저장/검색 방식, fallback 설명.
+실제 존재 여부: 확인됨
+짧은 비고: FAISS는 항상 동작하는 구조가 아님.
+
+6)
+파일 경로: /home/orugu/Docker/Final_project_rss/server_api/src/modules/llm/sample/agent.py
+왜 이 분류에 들어가는지: 실제 질문 처리, 세션 메모리, 웹 검색 보강, 응답 생성의 핵심 오케스트레이션 로직이다.
+활용 목적: 처리 흐름, 외부 의존성, 메모리/웹 검색 동작 설명.
+실제 존재 여부: 확인됨
+짧은 비고: 경로명이 sample이지만 실제 핵심 로직 참조 파일이다.
+
+7)
+파일 경로: /home/orugu/Docker/Final_project_rss/server_api/src/modules/llm/services/agent_service.py
+왜 이 분류에 들어가는지: sample/agent.py가 실제 서비스에서 singleton으로 연결된다는 증거다.
+활용 목적: 런타임 연결 근거, 오해 방지.
+실제 존재 여부: 확인됨
+짧은 비고: 매우 짧지만 중요도는 높음.
+
+8)
+파일 경로: /home/orugu/Docker/Final_project_rss/nginx/html/js/dashboard.js
+왜 이 분류에 들어가는지: 운영 UI에서 실제 호출하는 LLM API를 보여 주는 가장 강한 근거다.
+활용 목적: 운영 연계 범위, 사용자 흐름, 실사용 기능 판단.
+실제 존재 여부: 확인됨
+짧은 비고: 현재 확인된 직접 호출은 chat, stt, tts, recommended-questions.
+
+9)
+파일 경로: /home/orugu/Docker/Final_project_rss/nginx/html/configuration.html
+왜 이 분류에 들어가는지: 운영 화면이 dashboard.js를 포함하는 실제 페이지 근거다.
+활용 목적: 운영 화면-스크립트 연결 증거.
+실제 존재 여부: 확인됨
+짧은 비고: HTML 자체보다 JS 연결 증거가 중요함.
+
+10)
+파일 경로: /home/orugu/Docker/Final_project_rss/docs/architecture/llm_architecture_report.md
+왜 이 분류에 들어가는지: 코드 추적 기반으로 정리된 기존 LLM 구조 메모다.
+활용 목적: NotebookLM 초반 맥락 정리, 구현 위치 요약.
+실제 존재 여부: 확인됨
+짧은 비고: 최종 사실 판단은 코드 우선.

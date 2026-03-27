@@ -1,0 +1,892 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>web_dashboard.html — BE 아키텍처</title>
+<style>
+  :root {
+    --fe:       #1d4ed8;
+    --fe-light: #dbeafe;
+    --nginx:    #059669;
+    --nginx-light: #d1fae5;
+    --api:      #d97706;
+    --api-light:#fef3c7;
+    --auth:     #7c3aed;
+    --auth-light:#ede9fe;
+    --dash:     #dc2626;
+    --dash-light:#fee2e2;
+    --repo:     #0891b2;
+    --repo-light:#cffafe;
+    --db:       #374151;
+    --db-light: #f3f4f6;
+    --infra:    #9d174d;
+    --infra-light:#fce7f3;
+    --arrow:    #6b7280;
+    --bg:       #0f172a;
+    --surface:  #1e293b;
+    --border:   #334155;
+    --text:     #f1f5f9;
+    --muted:    #94a3b8;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Segoe UI', system-ui, sans-serif;
+    font-size: 13px;
+    line-height: 1.5;
+    padding: 32px 24px;
+  }
+
+  h1 {
+    font-size: 22px;
+    font-weight: 700;
+    color: #f8fafc;
+    margin-bottom: 4px;
+  }
+  .subtitle { color: var(--muted); font-size: 12px; margin-bottom: 28px; }
+
+  /* ── 전체 레이아웃 ── */
+  .arch-root {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 0;
+    max-width: 1100px;
+    margin: 0 auto;
+  }
+
+  /* ── 레이어 카드 ── */
+  .layer {
+    border: 1.5px solid var(--border);
+    border-radius: 10px;
+    padding: 16px 20px;
+    background: var(--surface);
+    position: relative;
+  }
+  .layer + .layer { margin-top: 8px; }
+
+  .layer-label {
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+    padding: 2px 8px;
+    border-radius: 999px;
+    display: inline-block;
+    margin-bottom: 10px;
+  }
+
+  /* 레이어 색상 */
+  .layer-fe    { border-color: var(--fe);    } .layer-fe    .layer-label { background:var(--fe);    color:#fff; }
+  .layer-nginx { border-color: var(--nginx); } .layer-nginx .layer-label { background:var(--nginx); color:#fff; }
+  .layer-api   { border-color: var(--api);   } .layer-api   .layer-label { background:var(--api);   color:#fff; }
+  .layer-auth  { border-color: var(--auth);  } .layer-auth  .layer-label { background:var(--auth);  color:#fff; }
+  .layer-dash  { border-color: var(--dash);  } .layer-dash  .layer-label { background:var(--dash);  color:#fff; }
+  .layer-repo  { border-color: var(--repo);  } .layer-repo  .layer-label { background:var(--repo);  color:#fff; }
+  .layer-db    { border-color: var(--db);    } .layer-db    .layer-label { background:var(--db);    color:#fff; }
+  .layer-infra { border-color: var(--infra); } .layer-infra .layer-label { background:var(--infra); color:#fff; }
+
+  /* ── 파일 박스 그리드 ── */
+  .file-grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .file-box {
+    border-radius: 6px;
+    padding: 8px 12px;
+    border: 1px solid transparent;
+    flex: 0 0 auto;
+  }
+  .file-box .fname { font-weight: 600; font-size: 12px; }
+  .file-box .fpath { color: var(--muted); font-size: 10px; margin-top: 1px; }
+  .file-box .fdesc { color: #cbd5e1; font-size: 11px; margin-top: 4px; }
+  .file-box .ftag  { display:inline-block; font-size:9px; padding:1px 6px; border-radius:999px; margin-top:4px; font-weight:600; }
+
+  .fb-fe    { background: var(--fe-light);    border-color:var(--fe);    color: #1e3a8a; }
+  .fb-nginx { background: var(--nginx-light); border-color:var(--nginx); color: #064e3b; }
+  .fb-api   { background: var(--api-light);   border-color:var(--api);   color: #78350f; }
+  .fb-auth  { background: var(--auth-light);  border-color:var(--auth);  color: #3b0764; }
+  .fb-dash  { background: var(--dash-light);  border-color:var(--dash);  color: #7f1d1d; }
+  .fb-repo  { background: var(--repo-light);  border-color:var(--repo);  color: #0c4a6e; }
+  .fb-db    { background: var(--db-light);    border-color:var(--db);    color: #111827; }
+  .fb-infra { background: var(--infra-light); border-color:var(--infra); color: #500724; }
+
+  /* ── 화살표 구분자 ── */
+  .arrow-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 6px 20px;
+  }
+  .arrow-line {
+    flex: 1;
+    height: 1px;
+    background: linear-gradient(to right, transparent, var(--border), transparent);
+  }
+  .arrow-body {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+  }
+  .arrow-icon {
+    font-size: 18px;
+    color: var(--arrow);
+    line-height: 1;
+  }
+  .arrow-label {
+    font-size: 10px;
+    color: var(--muted);
+    background: var(--surface);
+    border: 1px solid var(--border);
+    padding: 1px 8px;
+    border-radius: 999px;
+    white-space: nowrap;
+  }
+  .arrow-label.up-down {
+    font-size: 9px;
+  }
+
+  /* ── 내부 2컬럼 분할 ── */
+  .two-col {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+  }
+  .three-col {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 8px;
+  }
+
+  .sub-layer {
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px;
+    background: rgba(255,255,255,.02);
+  }
+  .sub-layer-title {
+    font-size: 10px;
+    font-weight: 700;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: .07em;
+    margin-bottom: 8px;
+  }
+
+  /* ── API 경로 테이블 ── */
+  .api-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 10px;
+    font-size: 11px;
+  }
+  .api-table th {
+    background: rgba(255,255,255,.06);
+    color: var(--muted);
+    padding: 4px 8px;
+    text-align: left;
+    font-weight: 600;
+    border-bottom: 1px solid var(--border);
+  }
+  .api-table td {
+    padding: 4px 8px;
+    border-bottom: 1px solid rgba(255,255,255,.04);
+    vertical-align: top;
+  }
+  .api-table tr:last-child td { border-bottom: none; }
+  .method { font-weight: 700; padding: 1px 6px; border-radius: 4px; font-size: 10px; }
+  .method.get  { background:#1a4731; color:#4ade80; }
+  .method.post { background:#3d1a00; color:#fb923c; }
+  .method.patch{ background:#1e1a4e; color:#818cf8; }
+  .method.del  { background:#4a1010; color:#f87171; }
+  .ep { color:#67e8f9; font-family: monospace; font-size: 11px; }
+  .ep-desc { color: var(--muted); }
+
+  /* ── DB 테이블 그리드 ── */
+  .db-grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 6px;
+  }
+  .db-table {
+    background: rgba(255,255,255,.05);
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    padding: 5px 10px;
+    font-size: 11px;
+    font-family: monospace;
+  }
+  .db-table .schema { font-size: 9px; color: var(--muted); }
+  .db-table .tname  { color: #e2e8f0; font-weight: 600; }
+
+  /* ── 흐름 설명 ── */
+  .flow-section {
+    margin-top: 28px;
+    max-width: 1100px;
+    margin-left: auto;
+    margin-right: auto;
+  }
+  .flow-section h2 {
+    font-size: 15px;
+    font-weight: 700;
+    color: #f8fafc;
+    margin-bottom: 12px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--border);
+  }
+  .flow-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+  }
+  .flow-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 14px 16px;
+  }
+  .flow-card h3 {
+    font-size: 12px;
+    font-weight: 700;
+    margin-bottom: 10px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .badge {
+    font-size: 9px;
+    font-weight: 700;
+    padding: 2px 7px;
+    border-radius: 999px;
+  }
+  .badge-auth  { background:var(--auth); color:#fff; }
+  .badge-dash  { background:var(--dash); color:#fff; }
+  .badge-token { background:var(--api);  color:#fff; }
+  .badge-db    { background:var(--repo); color:#fff; }
+
+  .flow-steps { list-style: none; }
+  .flow-steps li {
+    display: flex;
+    gap: 10px;
+    padding: 5px 0;
+    border-bottom: 1px solid rgba(255,255,255,.04);
+    font-size: 11.5px;
+    color: #cbd5e1;
+  }
+  .flow-steps li:last-child { border-bottom: none; }
+  .step-num {
+    min-width: 20px;
+    height: 20px;
+    border-radius: 999px;
+    background: var(--border);
+    color: var(--text);
+    font-size: 10px;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    margin-top: 1px;
+  }
+  .step-num.auth  { background:var(--auth); }
+  .step-num.dash  { background:var(--dash); }
+  .step-num.token { background:var(--api);  }
+  .step-num.db    { background:var(--repo); }
+
+  code {
+    background: rgba(255,255,255,.08);
+    padding: 1px 5px;
+    border-radius: 4px;
+    font-family: monospace;
+    font-size: 11px;
+    color: #93c5fd;
+  }
+
+  .legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-bottom: 20px;
+  }
+  .legend-item {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 11px;
+    color: var(--muted);
+  }
+  .legend-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 3px;
+  }
+</style>
+</head>
+<body>
+
+<h1>web_dashboard.html — BE 아키텍처</h1>
+<p class="subtitle">생성일: 2026-03-20 &nbsp;|&nbsp; 기준 파일: nginx/html/web_dashboard.html &amp; server_api/src/modules/dashboard/</p>
+
+<div class="legend">
+  <div class="legend-item"><div class="legend-dot" style="background:var(--fe)"></div> Frontend (Browser)</div>
+  <div class="legend-item"><div class="legend-dot" style="background:var(--nginx)"></div> Nginx</div>
+  <div class="legend-item"><div class="legend-dot" style="background:var(--api)"></div> FastAPI Core</div>
+  <div class="legend-item"><div class="legend-dot" style="background:var(--auth)"></div> Auth Module</div>
+  <div class="legend-item"><div class="legend-dot" style="background:var(--dash)"></div> Dashboard Module</div>
+  <div class="legend-item"><div class="legend-dot" style="background:var(--repo)"></div> Repository / DB Query</div>
+  <div class="legend-item"><div class="legend-dot" style="background:var(--db)"></div> PostgreSQL</div>
+</div>
+
+<!-- ══════════════════════════════════════════ -->
+<!-- LAYER 1: FE                                -->
+<!-- ══════════════════════════════════════════ -->
+<div class="arch-root">
+
+<div class="layer layer-fe">
+  <span class="layer-label">Frontend — Browser</span>
+  <div class="file-grid">
+    <div class="file-box fb-fe" style="min-width:200px">
+      <div class="fname">web_dashboard.html</div>
+      <div class="fpath">nginx/html/</div>
+      <div class="fdesc">4탭 구조 (worker / qa / manager / promo)<br>JWT 세션 선검사 → /web_login.html 리다이렉트</div>
+    </div>
+    <div class="file-box fb-fe" style="min-width:190px">
+      <div class="fname">dashboard_api.js</div>
+      <div class="fpath">js/wed_dashboard/</div>
+      <div class="fdesc">API 레이어 · Mock → Real 전환점<br>authorizedFetch · refreshAccessToken · redirectToLogin</div>
+    </div>
+    <div class="file-box fb-fe" style="min-width:170px">
+      <div class="fname">dashboard_app.js</div>
+      <div class="fpath">js/wed_dashboard/</div>
+      <div class="fdesc">탭 전환 · 폴링 · 데이터 주입<br>renderAll() 오케스트레이터</div>
+    </div>
+    <div class="file-box fb-fe" style="min-width:160px">
+      <div class="fname">dashboard_state.js</div>
+      <div class="fpath">js/wed_dashboard/</div>
+      <div class="fdesc">전역 상태 관리<br>currentTab · bundle · filterParams</div>
+    </div>
+    <div class="file-box fb-fe" style="min-width:160px">
+      <div class="fname">dashboard_charts.js</div>
+      <div class="fpath">js/wed_dashboard/</div>
+      <div class="fdesc">Chart.js 래퍼<br>ngTrend · defectRate · OEE · production</div>
+    </div>
+    <div class="file-box fb-fe" style="min-width:170px">
+      <div class="fname">dashboard_detail_views.js</div>
+      <div class="fpath">js/wed_dashboard/</div>
+      <div class="fdesc">상세 슬라이드 패널<br>equipment · lot · alarm · defect detail</div>
+    </div>
+    <div class="file-box fb-fe" style="min-width:150px">
+      <div class="fname">dashboard_thresholds.js</div>
+      <div class="fpath">js/wed_dashboard/</div>
+      <div class="fdesc">ok / warning / critical<br>상태 색상 매핑 기준</div>
+    </div>
+  </div>
+
+  <!-- API 엔드포인트 요약 -->
+  <div style="margin-top:12px">
+    <table class="api-table">
+      <tr><th>Method</th><th>Endpoint (FE → BE)</th><th>역할</th><th>Token</th></tr>
+      <tr>
+        <td><span class="method post">POST</span></td>
+        <td class="ep">/api/v1/auth/login</td>
+        <td class="ep-desc">ID/PW 로그인 → access_token + refresh_token</td>
+        <td>—</td>
+      </tr>
+      <tr>
+        <td><span class="method post">POST</span></td>
+        <td class="ep">/api/v1/auth/refresh</td>
+        <td class="ep-desc">토큰 갱신 (401 intercept)</td>
+        <td>refresh_token</td>
+      </tr>
+      <tr>
+        <td><span class="method get">GET</span></td>
+        <td class="ep">/api/v1/dashboard/web/worker</td>
+        <td class="ep-desc">작업자 탭 전체 번들</td>
+        <td>Bearer</td>
+      </tr>
+      <tr>
+        <td><span class="method get">GET</span></td>
+        <td class="ep">/api/v1/dashboard/web/qa</td>
+        <td class="ep-desc">품질관리자 탭 전체 번들</td>
+        <td>Bearer</td>
+      </tr>
+      <tr>
+        <td><span class="method get">GET</span></td>
+        <td class="ep">/api/v1/dashboard/web/manager</td>
+        <td class="ep-desc">관리자 탭 전체 번들</td>
+        <td>Bearer</td>
+      </tr>
+      <tr>
+        <td><span class="method get">GET</span></td>
+        <td class="ep">/api/v1/dashboard/web/promo</td>
+        <td class="ep-desc">공용 송출 탭 전체 번들</td>
+        <td>Bearer</td>
+      </tr>
+      <tr>
+        <td><span class="method get">GET</span></td>
+        <td class="ep">/api/v1/dashboard/detail</td>
+        <td class="ep-desc">장비/LOT/불량 상세 슬라이드</td>
+        <td>Bearer</td>
+      </tr>
+    </table>
+  </div>
+</div>
+
+<!-- ARROW -->
+<div class="arrow-row">
+  <div class="arrow-line"></div>
+  <div class="arrow-body">
+    <div class="arrow-icon">↕</div>
+    <div class="arrow-label">HTTPS · /api/v1/* 프록시 / 정적 파일 서빙</div>
+  </div>
+  <div class="arrow-line"></div>
+</div>
+
+<!-- ══════════════════════════════════════════ -->
+<!-- LAYER 2: NGINX                             -->
+<!-- ══════════════════════════════════════════ -->
+<div class="layer layer-nginx">
+  <span class="layer-label">Nginx — Reverse Proxy</span>
+  <div class="file-grid">
+    <div class="file-box fb-nginx" style="min-width:200px">
+      <div class="fname">conf.d/default.conf</div>
+      <div class="fpath">nginx/</div>
+      <div class="fdesc">
+        <code>location /api/</code> → <code>server_api:8000</code> 프록시<br>
+        정적 HTML/JS/CSS 서빙 (<code>nginx/html/</code>)<br>
+        SSL 종단 처리 (certs/server.crt)
+      </div>
+    </div>
+    <div class="file-box fb-nginx" style="min-width:160px">
+      <div class="fname">Dockerfile</div>
+      <div class="fpath">nginx/</div>
+      <div class="fdesc">nginx:alpine 기반<br>compose.yml에서 포트 443/80 매핑</div>
+    </div>
+  </div>
+</div>
+
+<!-- ARROW -->
+<div class="arrow-row">
+  <div class="arrow-line"></div>
+  <div class="arrow-body">
+    <div class="arrow-icon">↕</div>
+    <div class="arrow-label">HTTP → FastAPI (uvicorn :8000)</div>
+  </div>
+  <div class="arrow-line"></div>
+</div>
+
+<!-- ══════════════════════════════════════════ -->
+<!-- LAYER 3: FastAPI Core                      -->
+<!-- ══════════════════════════════════════════ -->
+<div class="layer layer-api">
+  <span class="layer-label">FastAPI — Core</span>
+  <div class="file-grid">
+    <div class="file-box fb-api" style="min-width:200px">
+      <div class="fname">main.py</div>
+      <div class="fpath">server_api/src/</div>
+      <div class="fdesc">
+        FastAPI app 생성 · <code>startup</code> 이벤트<br>
+        DB 테이블 자동 생성 (<code>Base.metadata.create_all</code>)<br>
+        admin seed · dashboard dummy data seed<br>
+        <code>api_v1_router</code> 등록 (<code>/api/v1</code>)
+      </div>
+    </div>
+    <div class="file-box fb-api" style="min-width:190px">
+      <div class="fname">api/v1/router.py</div>
+      <div class="fpath">server_api/src/</div>
+      <div class="fdesc">
+        모든 모듈 라우터를 <code>api_v1_router</code>에 병합<br>
+        auth · dashboard · llm · vision · rag · report<br>
+        optimization · voice_interaction · db/items
+      </div>
+    </div>
+    <div class="file-box fb-api" style="min-width:160px">
+      <div class="fname">lib/database.py</div>
+      <div class="fpath">server_api/src/</div>
+      <div class="fdesc">
+        SQLAlchemy <code>engine</code> 생성<br>
+        <code>get_db()</code> Depends 제공
+      </div>
+    </div>
+    <div class="file-box fb-api" style="min-width:140px">
+      <div class="fname">lib/settings.py</div>
+      <div class="fpath">server_api/src/</div>
+      <div class="fdesc">환경변수 로드<br>DB URL · app 설정</div>
+    </div>
+  </div>
+</div>
+
+<!-- ARROW -->
+<div class="arrow-row">
+  <div class="arrow-line"></div>
+  <div class="arrow-body">
+    <div class="arrow-icon">↕</div>
+    <div class="arrow-label">Depends(get_current_user) — JWT 검증 공통 적용</div>
+  </div>
+  <div class="arrow-line"></div>
+</div>
+
+<!-- ══════════════════════════════════════════ -->
+<!-- LAYER 4: Modules (Auth + Dashboard)        -->
+<!-- ══════════════════════════════════════════ -->
+<div class="layer" style="border-color: #475569; padding-bottom:16px;">
+  <span class="layer-label" style="background:#475569; color:#fff;">Business Modules</span>
+  <div class="two-col">
+
+    <!-- Auth Sub-layer -->
+    <div class="sub-layer" style="border-color: var(--auth);">
+      <div class="sub-layer-title" style="color:var(--auth);">Auth Module — /api/v1/auth/*</div>
+      <div class="file-grid" style="gap:6px;">
+        <div class="file-box fb-auth" style="min-width:150px;">
+          <div class="fname">auth/router.py</div>
+          <div class="fpath">modules/</div>
+          <div class="fdesc">
+            POST /login · /login/face<br>
+            POST /refresh<br>
+            POST /logout<br>
+            PATCH /users/{no}/password<br>
+            PATCH /users/{no}/line<br>
+            GET /web-login-profile/{no}
+          </div>
+        </div>
+        <div class="file-box fb-auth" style="min-width:140px;">
+          <div class="fname">auth/service.py</div>
+          <div class="fpath">modules/</div>
+          <div class="fdesc">
+            login_with_password<br>
+            face_login_with_matching<br>
+            refresh_access_token<br>
+            create_user · logout_user<br>
+            get_web_login_profile
+          </div>
+        </div>
+        <div class="file-box fb-auth" style="min-width:120px;">
+          <div class="fname">auth/jwt.py</div>
+          <div class="fpath">modules/</div>
+          <div class="fdesc">
+            JWT 생성 / 검증<br>
+            <code>get_current_user</code><br>
+            Depends 의존성
+          </div>
+        </div>
+        <div class="file-box fb-auth" style="min-width:120px;">
+          <div class="fname">auth/db/crud.py</div>
+          <div class="fpath">modules/</div>
+          <div class="fdesc">
+            사용자 조회/생성<br>
+            face embedding CRUD<br>
+            refresh token 관리
+          </div>
+        </div>
+        <div class="file-box fb-auth" style="min-width:120px;">
+          <div class="fname">auth/vision/service.py</div>
+          <div class="fpath">modules/</div>
+          <div class="fdesc">
+            얼굴 임베딩 매칭<br>
+            face login 벡터 비교
+          </div>
+        </div>
+        <div class="file-box fb-auth" style="min-width:120px;">
+          <div class="fname">common/rbac.py</div>
+          <div class="fpath">modules/</div>
+          <div class="fdesc">역할 기반 권한<br>worker/qa/manager</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Dashboard Sub-layer -->
+    <div class="sub-layer" style="border-color: var(--dash);">
+      <div class="sub-layer-title" style="color:var(--dash);">Dashboard Module — /api/v1/dashboard/*</div>
+      <div class="file-grid" style="gap:6px;">
+        <div class="file-box fb-dash" style="min-width:150px;">
+          <div class="fname">dashboard/router.py</div>
+          <div class="fpath">modules/</div>
+          <div class="fdesc">
+            GET /web/worker<br>
+            GET /web/qa<br>
+            GET /web/manager<br>
+            GET /web/promo<br>
+            GET /kpis · /datasets · /detail<br>
+            쿼리 파라미터: tz / factory / line / shift / period / date_from / date_to
+          </div>
+        </div>
+        <div class="file-box fb-dash" style="min-width:150px;">
+          <div class="fname">dashboard/service.py</div>
+          <div class="fpath">modules/</div>
+          <div class="fdesc">
+            get_web_worker_dashboard<br>
+            get_web_qa_dashboard<br>
+            get_web_manager_dashboard<br>
+            get_web_promo_dashboard<br>
+            get_dashboard_kpis / datasets / detail<br>
+            KPI 계산 · 번들 조립 · stale 판단
+          </div>
+        </div>
+        <div class="file-box fb-dash" style="min-width:130px;">
+          <div class="fname">dashboard/schemas.py</div>
+          <div class="fpath">modules/</div>
+          <div class="fdesc">
+            KpiItem · AssistiveItem<br>
+            DashboardKPIResponse<br>
+            DashboardDatasetsResponse<br>
+            DashboardDetailResponse<br>
+            Pydantic v2 모델
+          </div>
+        </div>
+        <div class="file-box fb-dash" style="min-width:130px;">
+          <div class="fname">dashboard/db/model.py</div>
+          <div class="fpath">modules/</div>
+          <div class="fdesc">
+            SQLAlchemy ORM 모델<br>
+            wed_dashboard 스키마 테이블 정의<br>
+            startup 때 DDL 자동 적용
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ARROW -->
+<div class="arrow-row">
+  <div class="arrow-line"></div>
+  <div class="arrow-body">
+    <div class="arrow-icon">↕</div>
+    <div class="arrow-label">SQLAlchemy engine · raw SQL (text())</div>
+  </div>
+  <div class="arrow-line"></div>
+</div>
+
+<!-- ══════════════════════════════════════════ -->
+<!-- LAYER 5: Repository                        -->
+<!-- ══════════════════════════════════════════ -->
+<div class="layer layer-repo">
+  <span class="layer-label">Repository — DB Query Layer</span>
+  <div class="file-grid">
+    <div class="file-box fb-repo" style="min-width:230px;">
+      <div class="fname">dashboard/repository.py</div>
+      <div class="fpath">server_api/src/modules/</div>
+      <div class="fdesc">
+        <strong>WebDashboardSnapshot</strong> dataclass — 화면 전체 데이터 컨테이너<br>
+        <code>get_web_dashboard_snapshot(line_code, target_date)</code><br>
+        &nbsp;&nbsp;→ 시간 범위 계산 (KST, shift_start~effective_now)<br>
+        &nbsp;&nbsp;→ totals / month_totals / alarms / top_defects<br>
+        &nbsp;&nbsp;→ hourly_production / line_production / recheck_rows<br>
+        &nbsp;&nbsp;→ focus_line OEE 계산 (availability × performance × quality)<br>
+        &nbsp;&nbsp;→ _risk_score() — 리스크 점수 산출<br>
+        &nbsp;&nbsp;→ focus_ng_trend (10분 버킷) / focus_equipment_status<br>
+        &nbsp;&nbsp;→ focus_line_environment / focus_events / issue_rows<br>
+        &nbsp;&nbsp;→ daily_production (7일 집계)<br><br>
+        <code>get_dashboard_live_snapshot()</code> — vision_result 기반 라이브 분석<br>
+        <code>get_defect_detail(defect_type)</code> · <code>get_request_detail(request_id)</code>
+      </div>
+    </div>
+    <div class="file-box fb-repo" style="min-width:180px;">
+      <div class="fname">repository.py (helpers)</div>
+      <div class="fpath">server_api/src/modules/dashboard/</div>
+      <div class="fdesc">
+        <code>_fetch_all(stmt, params)</code> — rows 반환<br>
+        <code>_fetch_one(stmt, params)</code> — 단일 row<br>
+        <code>_dashboard_time_bounds()</code> — KST 시간 경계<br>
+        <code>_resolve_web_focus_line()</code> — 포커스 라인 결정<br>
+        <code>_line_plan_total()</code> — 경과 비율 × 일일 계획<br>
+        <code>_risk_score()</code> — avail/quality/perf/alarm 가중합
+      </div>
+    </div>
+    <div class="file-box fb-repo" style="min-width:160px;">
+      <div class="fname">scripts/generate_wed_dashboard_dummy.py</div>
+      <div class="fpath">server_api/src/</div>
+      <div class="fdesc">
+        startup 시 dummy 데이터 자동 시딩<br>
+        2026-03-20 ~ 2026-03-25<br>
+        production_records · defect_results<br>
+        inspection_results · alarms 등 생성
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ARROW -->
+<div class="arrow-row">
+  <div class="arrow-line"></div>
+  <div class="arrow-body">
+    <div class="arrow-icon">↕</div>
+    <div class="arrow-label">PostgreSQL TCP (5432) · wed_dashboard schema</div>
+  </div>
+  <div class="arrow-line"></div>
+</div>
+
+<!-- ══════════════════════════════════════════ -->
+<!-- LAYER 6: Database                          -->
+<!-- ══════════════════════════════════════════ -->
+<div class="layer layer-db">
+  <span class="layer-label">PostgreSQL — Database</span>
+  <div class="two-col">
+    <div class="sub-layer">
+      <div class="sub-layer-title">wed_dashboard 스키마 — 대시보드 핵심 테이블</div>
+      <div class="db-grid">
+        <div class="db-table"><div class="schema">wed_dashboard.</div><div class="tname">production_records</div></div>
+        <div class="db-table"><div class="schema">wed_dashboard.</div><div class="tname">defect_results</div></div>
+        <div class="db-table"><div class="schema">wed_dashboard.</div><div class="tname">inspection_results</div></div>
+        <div class="db-table"><div class="schema">wed_dashboard.</div><div class="tname">recheck_queue</div></div>
+        <div class="db-table"><div class="schema">wed_dashboard.</div><div class="tname">alarms</div></div>
+        <div class="db-table"><div class="schema">wed_dashboard.</div><div class="tname">alarm_ack_history</div></div>
+        <div class="db-table"><div class="schema">wed_dashboard.</div><div class="tname">lines</div></div>
+        <div class="db-table"><div class="schema">wed_dashboard.</div><div class="tname">equipments</div></div>
+        <div class="db-table"><div class="schema">wed_dashboard.</div><div class="tname">equipment_status_history</div></div>
+        <div class="db-table"><div class="schema">wed_dashboard.</div><div class="tname">line_environment</div></div>
+        <div class="db-table"><div class="schema">wed_dashboard.</div><div class="tname">event_logs</div></div>
+        <div class="db-table"><div class="schema">wed_dashboard.</div><div class="tname">employees</div></div>
+      </div>
+    </div>
+    <div class="sub-layer">
+      <div class="sub-layer-title">기타 스키마 — 비전 / 인증</div>
+      <div class="db-grid">
+        <div class="db-table"><div class="schema">public.</div><div class="tname">vision_result</div></div>
+        <div class="db-table"><div class="schema">public.</div><div class="tname">defect_type</div></div>
+        <div class="db-table"><div class="schema">public.</div><div class="tname">users (UserTable)</div></div>
+        <div class="db-table"><div class="schema">public.</div><div class="tname">face_embeddings</div></div>
+        <div class="db-table"><div class="schema">public.</div><div class="tname">vectors</div></div>
+        <div class="db-table"><div class="schema">public.</div><div class="tname">items</div></div>
+      </div>
+      <div style="margin-top:10px; font-size:11px; color:var(--muted);">
+        SQL DDL: <code>server_api/sql/wed_dashboard_schema.sql</code>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════ -->
+<!-- LAYER 7: Infra                             -->
+<!-- ══════════════════════════════════════════ -->
+<div class="layer layer-infra" style="margin-top:8px;">
+  <span class="layer-label">인프라 — Docker Compose</span>
+  <div class="file-grid">
+    <div class="file-box fb-infra" style="min-width:200px;">
+      <div class="fname">compose.yml</div>
+      <div class="fpath">Final_project_rss/</div>
+      <div class="fdesc">서비스: nginx · server_api · postgres · redis<br>네트워크 연결 · 볼륨 마운트 관리</div>
+    </div>
+    <div class="file-box fb-infra" style="min-width:160px;">
+      <div class="fname">server_api/Dockerfile</div>
+      <div class="fpath"></div>
+      <div class="fdesc">Python 3.12 · uvicorn<br>requirements.txt 기반 의존성 설치</div>
+    </div>
+    <div class="file-box fb-infra" style="min-width:140px;">
+      <div class="fname">Redis</div>
+      <div class="fpath">redis/redis.conf</div>
+      <div class="fdesc">캐시 / 세션 보조<br>limits.conf 메모리 제한</div>
+    </div>
+    <div class="file-box fb-infra" style="min-width:140px;">
+      <div class="fname">.env</div>
+      <div class="fpath">Final_project_rss/</div>
+      <div class="fdesc">DATABASE_URL · SECRET_KEY<br>OPENAI_API_KEY 등 환경 변수</div>
+    </div>
+  </div>
+</div>
+
+</div><!-- /arch-root -->
+
+<!-- ══════════════════════════════════════════ -->
+<!-- 요청 흐름 섹션                              -->
+<!-- ══════════════════════════════════════════ -->
+<div class="flow-section">
+  <h2>주요 요청 흐름</h2>
+  <div class="flow-grid">
+
+    <!-- Flow 1: Login -->
+    <div class="flow-card">
+      <h3><span class="badge badge-auth">AUTH</span> 로그인 흐름</h3>
+      <ul class="flow-steps">
+        <li><span class="step-num auth">1</span>사용자가 <code>/web_login.html</code>에서 ID/PW 입력</li>
+        <li><span class="step-num auth">2</span><code>POST /api/v1/auth/login</code> → Nginx 프록시</li>
+        <li><span class="step-num auth">3</span><code>auth/router.py</code> → <code>auth/service.py:login_with_password()</code></li>
+        <li><span class="step-num auth">4</span><code>auth/db/crud.py</code> → <code>users</code> 테이블 조회 · bcrypt 검증</li>
+        <li><span class="step-num auth">5</span><code>auth/jwt.py</code> → access_token(15m) + refresh_token(7d) 발급</li>
+        <li><span class="step-num auth">6</span>FE: <code>sessionStorage.sfp_access_token</code> + <code>localStorage.dashboard_auth_v1</code> 저장</li>
+        <li><span class="step-num auth">7</span><code>window.location → /web_dashboard.html</code> 이동</li>
+      </ul>
+    </div>
+
+    <!-- Flow 2: Dashboard Data -->
+    <div class="flow-card">
+      <h3><span class="badge badge-dash">DASHBOARD</span> 대시보드 데이터 로딩</h3>
+      <ul class="flow-steps">
+        <li><span class="step-num dash">1</span><code>dashboard_app.js</code> 탭 활성화 → <code>DASHBOARD_API.fetchBundle(tab)</code></li>
+        <li><span class="step-num dash">2</span><code>dashboard_api.js:authorizedFetch()</code> → <code>Authorization: Bearer {token}</code></li>
+        <li><span class="step-num dash">3</span>Nginx → <code>GET /api/v1/dashboard/web/{tab}</code> → FastAPI</li>
+        <li><span class="step-num dash">4</span><code>dashboard/router.py</code> — <code>get_current_user</code> Depends로 JWT 검증</li>
+        <li><span class="step-num dash">5</span><code>dashboard/service.py:get_web_{tab}_dashboard()</code> 호출</li>
+        <li><span class="step-num dash">6</span><code>dashboard/repository.py:get_web_dashboard_snapshot()</code> — 다수 SQL 쿼리 실행</li>
+        <li><span class="step-num dash">7</span>KPI 계산 · OEE · risk_score → JSON 번들 조립 후 반환</li>
+        <li><span class="step-num dash">8</span><code>dashboard_api.js:normalizeBundle()</code> → <code>dashboard_app.js:renderAll()</code></li>
+      </ul>
+    </div>
+
+    <!-- Flow 3: Token Refresh -->
+    <div class="flow-card">
+      <h3><span class="badge badge-token">TOKEN</span> 토큰 자동 갱신 (401 intercept)</h3>
+      <ul class="flow-steps">
+        <li><span class="step-num token">1</span>API 응답 <code>401</code> 수신</li>
+        <li><span class="step-num token">2</span><code>dashboard_api.js:refreshAccessToken()</code> 호출</li>
+        <li><span class="step-num token">3</span><code>POST /api/v1/auth/refresh</code> with <code>refresh_token</code></li>
+        <li><span class="step-num token">4</span><code>auth/service.py:refresh_access_token()</code> → 새 access_token 발급</li>
+        <li><span class="step-num token">5</span><code>sessionStorage.sfp_access_token</code> 갱신</li>
+        <li><span class="step-num token">6</span>원래 요청 재시도 (새 토큰으로)</li>
+        <li><span class="step-num token">7</span>재시도도 401이면 <code>redirectToLogin()</code> → 로그아웃</li>
+      </ul>
+    </div>
+
+    <!-- Flow 4: DB Query Detail -->
+    <div class="flow-card">
+      <h3><span class="badge badge-db">REPOSITORY</span> WebDashboardSnapshot 쿼리 구조</h3>
+      <ul class="flow-steps">
+        <li><span class="step-num db">1</span><code>_dashboard_time_bounds()</code> — shift_start / effective_now / elapsed_ratio (KST)</li>
+        <li><span class="step-num db">2</span><code>production_records</code> — total / month 생산량 합산</li>
+        <li><span class="step-num db">3</span><code>alarms</code> → active/hold 알람 수 + 상세 목록 (JOIN lines, equipments)</li>
+        <li><span class="step-num db">4</span><code>defect_results</code> → top_defects (상위 6종)</li>
+        <li><span class="step-num db">5</span><code>lines</code> → 라인별 OEE 계산 (availability × performance × quality)</li>
+        <li><span class="step-num db">6</span><code>_resolve_web_focus_line()</code> — 포커스 라인 결정 (요청 → LINE-C → risk_score 최악)</li>
+        <li><span class="step-num db">7</span><code>recheck_queue</code> / <code>inspection_results</code> / <code>event_logs</code> / <code>line_environment</code></li>
+        <li><span class="step-num db">8</span>10분 버킷 NG 트렌드 · 설비 가동 상태 → <code>WebDashboardSnapshot</code> 반환</li>
+      </ul>
+    </div>
+
+  </div>
+</div>
+
+<!-- 파일 참조 목록 -->
+<div class="flow-section" style="margin-top:24px;">
+  <h2>BE 핵심 파일 목록 (web_dashboard 관련)</h2>
+  <table class="api-table" style="font-size:11.5px;">
+    <tr><th>파일</th><th>경로</th><th>역할 요약</th></tr>
+    <tr><td>main.py</td><td>server_api/src/</td><td>FastAPI 앱 엔트리포인트 · startup 이벤트 · 라우터 등록</td></tr>
+    <tr><td>api/v1/router.py</td><td>server_api/src/</td><td>api_v1_router — 모든 모듈 라우터 통합</td></tr>
+    <tr><td>lib/database.py</td><td>server_api/src/</td><td>SQLAlchemy engine / get_db() Depends</td></tr>
+    <tr><td>lib/settings.py</td><td>server_api/src/</td><td>환경변수 · DATABASE_URL · API prefix 설정</td></tr>
+    <tr><td>modules/auth/router.py</td><td>server_api/src/</td><td>/auth/* 엔드포인트 라우터</td></tr>
+    <tr><td>modules/auth/service.py</td><td>server_api/src/</td><td>로그인 · 토큰 발급 · 사용자 관리 비즈니스 로직</td></tr>
+    <tr><td>modules/auth/jwt.py</td><td>server_api/src/</td><td>JWT 생성/검증 · get_current_user Depends</td></tr>
+    <tr><td>modules/auth/db/crud.py</td><td>server_api/src/</td><td>사용자 CRUD · face embedding · refresh token DB 처리</td></tr>
+    <tr><td>modules/common/rbac.py</td><td>server_api/src/</td><td>역할 기반 접근 제어</td></tr>
+    <tr><td><strong>modules/dashboard/router.py</strong></td><td>server_api/src/</td><td><strong>대시보드 4탭 web 엔드포인트 · kpis/datasets/detail</strong></td></tr>
+    <tr><td><strong>modules/dashboard/service.py</strong></td><td>server_api/src/</td><td><strong>탭별 번들 조립 · KPI 계산 · stale 판단</strong></td></tr>
+    <tr><td><strong>modules/dashboard/repository.py</strong></td><td>server_api/src/</td><td><strong>웹 대시보드 스냅샷 전체 DB 쿼리 · OEE/risk_score 계산</strong></td></tr>
+    <tr><td><strong>modules/dashboard/schemas.py</strong></td><td>server_api/src/</td><td><strong>Pydantic 응답 모델 · KpiItem · DashboardDetailResponse</strong></td></tr>
+    <tr><td>modules/dashboard/db/model.py</td><td>server_api/src/</td><td>wed_dashboard 스키마 SQLAlchemy ORM 테이블 정의</td></tr>
+    <tr><td>scripts/generate_wed_dashboard_dummy.py</td><td>server_api/src/</td><td>startup 시 dummy 데이터 자동 시딩 (2026-03-20~25)</td></tr>
+    <tr><td>sql/wed_dashboard_schema.sql</td><td>server_api/</td><td>wed_dashboard 스키마 DDL</td></tr>
+    <tr><td>nginx/conf.d/default.conf</td><td></td><td>Nginx /api/ 프록시 설정 · SSL 종단</td></tr>
+    <tr><td>compose.yml</td><td>Final_project_rss/</td><td>Docker Compose 전체 서비스 정의</td></tr>
+  </table>
+</div>
+
+</body>
+</html>

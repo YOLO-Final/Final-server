@@ -1,0 +1,3075 @@
+PROJECT ROOT: /home/orugu/Docker/Final_project_rss
+GENERATED AT: 2026-03-14 19:08:39 KST
+
+============================================================
+FILE: nginx/html/web_dashboard.html
+============================================================
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>PCB Dashboard</title>
+  <link rel="stylesheet" href="css/wed_dashboard/dashboard_style.css" />
+  <link rel="stylesheet" href="css/wed_dashboard/dashboard_status.css" />
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+  <header class="tabs">
+    <button class="tab-btn" data-tab="worker" id="tab-worker">작업자</button>
+    <button class="tab-btn" data-tab="qa" id="tab-qa">품질관리자</button>
+    <button class="tab-btn active" data-tab="manager" id="tab-manager">관리자</button>
+    <button class="tab-btn" data-tab="promo" id="tab-promo">홍보</button>
+  </header>
+
+  <main id="content"></main>
+
+  <script src="js/wed_dashboard/dashboard_api.js"></script>
+  <script src="js/wed_dashboard/dashboard_charts.js"></script>
+  <script src="js/wed_dashboard/dashboard_app.js"></script>
+</body>
+</html>
+
+
+============================================================
+FILE: nginx/html/js/wed_dashboard/dashboard_app.js
+============================================================
+/**
+ * app.js — 메인 애플리케이션 로직
+ * ──────────────────────────────────────────────────────────
+ * 역할:
+ *  1. 앱 시작 시 API에서 전체 데이터 로드
+ *  2. 탭 전환 처리 (worker / qa / manager / promo)
+ *  3. 각 화면 HTML 렌더링 + 차트 초기화
+ *  4. 홍보 스크린: 실시간 시계 + TOP Defect 자동 롤링
+ */
+
+// ── 탭 정의 (id, 레이블, 활성 색상) ─────────────────────
+const TABS = [
+  { id: "worker",  label: "작업자",    color: "#f87171" },
+  { id: "qa",      label: "품질관리자", color: "#fbbf24" },
+  { id: "manager", label: "관리자",    color: "#22d3a0" },
+  { id: "promo",   label: "홍보",      color: "#22d3ee" },
+];
+
+// 현재 활성 탭
+let currentTab = "manager";
+
+// API 데이터 캐시 (탭 전환 시 재요청 없이 재사용)
+let cache = null;
+
+// 홍보 스크린 타이머 ID (언마운트 시 클리어)
+let promoTimers = [];
+
+// ── 상태별 색상 ──────────────────────────────────────────
+const STATUS_COLOR = { RUN: "#22d3a0", IDLE: "#fbbf24", DOWN: "#f87171" };
+const STATUS_BG    = { RUN: "#022c22", IDLE: "#2c1d00", DOWN: "#2d0000" };
+
+/** defects 배열에서 class_name으로 색상 조회 */
+function defectColor(clsName, defects) {
+  return defects.find(d => d.class_name === clsName)?.color ?? "#6b7fa3";
+}
+
+// ── 유틸: HTML 이스케이프 (XSS 방지) ────────────────────
+function esc(str) {
+  return String(str)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
+// ── 유틸: 숫자 포맷 ─────────────────────────────────────
+const fmt = (n) => formatChartNumber(n);
+const pct = (n, dec = 1) => {
+  const txt = formatChartPercent(n, dec);
+  return txt === "-" ? "-" : `${txt}%`;
+};
+
+// ── 9.5.3.7 도넛차트 헬퍼 ───────────────────────────────
+
+/**
+ * 도넛차트 범례 HTML 반환
+ * @param {Array}  items  - [{ label, value, color }]
+ * @param {number} total  - 전체 합계 (비율 표시용, 0이면 값만 표시)
+ */
+function donutLegendHTML(items, total) {
+  return items.map((d) => {
+    const pctVal = total ? (d.percentText ?? `${((Number(d.value) || 0) / total * 100).toFixed(1)}%`) : "";
+    return `
+      <div style="display:flex;align-items:center;gap:6px;margin-bottom:7px">
+        <div style="width:8px;height:8px;border-radius:50%;background:${d.color};flex-shrink:0"></div>
+        <span style="font-size:11px;color:#6b7fa3;flex:1">${esc(d.label)}</span>
+        <span style="font-size:12px;color:${d.color};font-family:'DM Mono',monospace;font-weight:700">
+          ${esc(pctVal || d.valueText || formatChartNumber(d.value))}
+        </span>
+      </div>`;
+  }).join("");
+}
+
+/** 라인 배열 → 상태별 도넛 데이터 변환 */
+function buildStatusDistribution(lines) {
+  const LABEL = { RUN: "가동중", IDLE: "대기", DOWN: "정지" };
+  const COLOR  = { RUN: "#22d3a0", IDLE: "#fbbf24", DOWN: "#f87171" };
+  const counts = {};
+  (lines ?? []).forEach(l => { counts[l.status] = (counts[l.status] ?? 0) + 1; });
+  return Object.entries(counts).map(([st, cnt]) => ({
+    label: LABEL[st] ?? st,
+    value: cnt,
+    color: COLOR[st] ?? "#6b7fa3",
+  }));
+}
+
+// ════════════════════════════════════════════════════════
+// 🖼️ HTML 렌더러
+// ════════════════════════════════════════════════════════
+
+const KPI_STATUS_COLOR = { normal: "#22d3a0", warning: "#fbbf24", danger: "#f87171", neutral: "#6b7fa3" };
+const KPI_STATUS_BG = { normal: "#022c22", warning: "#2c1d00", danger: "#2d0000", neutral: "#151f2e" };
+const KPI_TREND_COLOR = { up: "#f87171", down: "#22d3a0", flat: "#6b7fa3" };
+const KPI_TREND_ICON = { up: "▲", down: "▼", flat: "—" };
+
+// ════════════════════════════════════════════════════════
+// 9.5.3.4 상태 배지 / 프로그레스 바
+// ════════════════════════════════════════════════════════
+
+/**
+ * 내부 상태값(value) → tone(normal/warning/danger/neutral) 반환
+ * @param {string|number} value  - 상태값 또는 수치
+ * @param {object} [opts]
+ *   opts.thresholds  - [{max, tone}] 오름차순. 미지정 시 기본 규칙 사용
+ *   opts.invert      - true: 낮을수록 danger (자재 잔량 등)
+ */
+function resolveTone(value, opts = {}) {
+  // 문자열 상태값 매핑
+  const STATUS_TONE = {
+    RUN:    "normal",
+    IDLE:   "warning",
+    DOWN:   "danger",
+    normal: "normal",
+    warning:"warning",
+    danger: "danger",
+  };
+  if (typeof value === "string") return STATUS_TONE[value] ?? "neutral";
+
+  // 수치 기반 임계치
+  const num = Number(value);
+  const thresholds = opts.thresholds ?? [
+    { max: 39,  tone: opts.invert ? "normal"  : "danger"  },
+    { max: 69,  tone: "warning" },
+    { max: 100, tone: opts.invert ? "danger"  : "normal"  },
+  ];
+  for (const t of thresholds) {
+    if (num <= t.max) return t.tone;
+  }
+  return opts.invert ? "danger" : "normal";
+}
+
+/**
+ * 상태 배지 HTML 반환 (재사용 가능)
+ * @param {object} p
+ *   p.value      - 내부 상태값 (예: "RUN", "normal", "danger")
+ *   p.label      - 표시 텍스트 (예: "가동중", "정상", "위험")
+ *   p.tone       - 직접 지정 시 value 해석 생략 ("normal"|"warning"|"danger"|"neutral")
+ *   p.showDot    - 점 인디케이터 표시 여부 (기본 true)
+ */
+function statusBadgeHTML(p) {
+  const tone = p.tone ?? resolveTone(p.value);
+  const dot  = p.showDot !== false
+    ? `<span class="status-badge-dot" aria-hidden="true"></span>`
+    : "";
+  return `<span class="status-badge status-badge--${tone}" role="status" aria-label="${esc(p.label)}">${dot}${esc(p.label)}</span>`;
+}
+
+/** 로그 status -> tone/label 매핑 */
+function resolveLogMeta(status) {
+  const map = {
+    NG:    { tone: "danger",  label: "불량" },
+    ALARM: { tone: "danger",  label: "알람" },
+    CHECK: { tone: "warning", label: "재검" },
+    RUN:   { tone: "normal",  label: "가동" },
+    IDLE:  { tone: "warning", label: "대기" },
+    DOWN:  { tone: "danger",  label: "정지" },
+  };
+  return map[status] ?? { tone: "neutral", label: status ?? "중립" };
+}
+
+/** rawTimestamp 우선 최신순 정렬 (fallback: time 문자열) */
+function sortRecentLogs(logs = []) {
+  const toMs = (r) => {
+    const ts = new Date(r?.rawTimestamp).getTime();
+    return Number.isFinite(ts) ? ts : Date.parse(`1970-01-01T${r?.time ?? "00:00:00"}+09:00`);
+  };
+  return [...logs].sort((a, b) => toMs(b) - toMs(a));
+}
+
+function renderRecentLogList(logs = [], opts = {}) {
+  const limit = opts.limit ?? 10;
+  const rows = sortRecentLogs(logs).slice(0, limit);
+
+  if (!rows.length) {
+    return `<div class="log-list-empty">집계 기간 내 로그 없음</div>`;
+  }
+
+  const bodyRows = rows.map((r) => {
+    const logMeta = resolveLogMeta(r.status);
+    return `
+      <div class="log-list-row">
+        <span class="log-list-time">${esc(r.time ?? "-")}</span>
+        <span class="log-list-line">${esc(r.line ?? "-")}</span>
+        <span class="log-list-status">${statusBadgeHTML({ tone: logMeta.tone, label: logMeta.label })}</span>
+        <span class="log-list-message" title="${esc(r.message ?? "")}">${esc(r.message ?? "-")}</span>
+      </div>`;
+  }).join("");
+
+  return `
+    <div class="log-list">
+      <div class="log-list-head">
+        <span>시간</span>
+        <span>라인</span>
+        <span>상태</span>
+        <span>메시지</span>
+      </div>
+      <div class="log-list-body">${bodyRows}</div>
+    </div>`;
+}
+
+function formatDateTimeDisplay(value) {
+  return formatChartDateTime(value);
+}
+
+function resolveDetailStatusMeta(value) {
+  const map = {
+    PASS:  { tone: "normal",  label: "양품" },
+    OK:    { tone: "normal",  label: "정상" },
+    RUN:   { tone: "normal",  label: "가동" },
+    NG:    { tone: "danger",  label: "불량" },
+    FAIL:  { tone: "danger",  label: "불량" },
+    DOWN:  { tone: "danger",  label: "정지" },
+    CHECK: { tone: "warning", label: "재검" },
+    HOLD:  { tone: "warning", label: "보류" },
+    IDLE:  { tone: "warning", label: "대기" },
+  };
+  return map[value] ?? { tone: "neutral", label: value ?? "-" };
+}
+
+function compareDetailValues(a, b, type = "text", direction = "asc") {
+  const dir = direction === "desc" ? -1 : 1;
+
+  if (type === "datetime") {
+    const aTime = new Date(a).getTime();
+    const bTime = new Date(b).getTime();
+    const safeA = Number.isFinite(aTime) ? aTime : -Infinity;
+    const safeB = Number.isFinite(bTime) ? bTime : -Infinity;
+    return (safeA - safeB) * dir;
+  }
+
+  if (type === "number" || type === "percent") {
+    const safeA = Number.isFinite(Number(a)) ? Number(a) : -Infinity;
+    const safeB = Number.isFinite(Number(b)) ? Number(b) : -Infinity;
+    return (safeA - safeB) * dir;
+  }
+
+  return String(a ?? "").localeCompare(String(b ?? ""), "ko-KR") * dir;
+}
+
+function sortDetailRows(rows = [], sortBy = {}) {
+  const { key, type = "text", direction = "asc" } = sortBy;
+  if (!key) return [...rows];
+
+  return [...rows].sort((a, b) => compareDetailValues(a?.[key], b?.[key], type, direction));
+}
+
+function formatDetailCell(row, column) {
+  const raw = row?.[column.key];
+
+  if (column.type === "status") {
+    const meta = resolveDetailStatusMeta(raw);
+    return statusBadgeHTML({ tone: meta.tone, label: meta.label });
+  }
+
+  if (raw === null || raw === undefined || raw === "") {
+    return `<span class="detail-table-empty">-</span>`;
+  }
+
+  if (column.type === "datetime") {
+    const display = formatDateTimeDisplay(raw);
+    return `<span class="detail-table-mono" title="${esc(display)}">${esc(display)}</span>`;
+  }
+
+  if (column.type === "id") {
+    return `<span class="detail-table-mono" title="${esc(String(raw))}">${esc(String(raw))}</span>`;
+  }
+
+  if (column.type === "number") {
+    return `<span class="detail-table-num">${fmt(raw)}</span>`;
+  }
+
+  if (column.type === "percent") {
+    return `<span class="detail-table-num">${pct(raw)}</span>`;
+  }
+
+  const text = String(raw);
+  return `<span class="detail-table-text" title="${esc(text)}">${esc(text)}</span>`;
+}
+
+function renderDetailTable({ title, columns = [], rows = [], sortBy, emptyText = "상세 데이터 없음" }) {
+  const sortedRows = sortDetailRows(rows, sortBy);
+
+  const headHTML = columns.map((column) => {
+    const alignClass = column.align === "right" ? "detail-table-th--right" : "";
+    return `<th class="${alignClass}">${esc(column.label)}</th>`;
+  }).join("");
+
+  if (!sortedRows.length) {
+    return `
+      <div class="card">
+        <div class="section-title">${esc(title)}</div>
+        <div class="detail-table-empty-state">${esc(emptyText)}</div>
+      </div>`;
+  }
+
+  const bodyHTML = sortedRows.map((row) => {
+    const cells = columns.map((column) => {
+      const alignClass = column.align === "right" ? "detail-table-td--right" : "";
+      const cellClass = column.type ? `detail-table-td--${column.type}` : "";
+      return `<td class="${alignClass} ${cellClass}">${formatDetailCell(row, column)}</td>`;
+    }).join("");
+    return `<tr>${cells}</tr>`;
+  }).join("");
+
+  return `
+    <div class="card">
+      <div class="section-title">${esc(title)}</div>
+      <div class="detail-table-wrap">
+        <table class="detail-table">
+          <thead>
+            <tr>${headHTML}</tr>
+          </thead>
+          <tbody>${bodyHTML}</tbody>
+        </table>
+      </div>
+    </div>`;
+}
+
+/**
+ * 프로그레스 바 블록 HTML 반환 (재사용 가능)
+ * @param {object} p
+ *   p.label         - 항목 라벨
+ *   p.value         - 현재 값 (숫자)
+ *   p.max           - 최대 값 (기본 100)
+ *   p.unit          - 단위 (기본 "%")
+ *   p.helperText    - 보조 텍스트
+ *   p.tone          - 직접 tone 지정 시 임계치 계산 생략
+ *   p.invert        - true: 낮을수록 danger
+ *   p.thresholds    - 사용자 정의 임계치 배열
+ */
+function progressBarHTML(p) {
+  const max    = p.max  ?? 100;
+  const unit   = p.unit ?? "%";
+  const pct    = Math.min(Math.max((p.value / max) * 100, 0), 100).toFixed(1);
+  const tone   = p.tone ?? resolveTone(p.value, {
+    invert:     p.invert,
+    thresholds: p.thresholds,
+  });
+  const displayVal = typeof p.value === "number"
+    ? (Number.isInteger(p.value) ? p.value : p.value.toFixed(1))
+    : p.value;
+  const helperHTML = p.helperText
+    ? `<div class="progress-block-helper">${esc(p.helperText)}</div>`
+    : "";
+
+  // 색상 강조: 값 색상도 tone 연동
+  const valColor = KPI_STATUS_COLOR[tone] ?? KPI_STATUS_COLOR.neutral;
+
+  return `
+    <div class="progress-block">
+      <div class="progress-block-header">
+        <span class="progress-block-label">${esc(p.label)}</span>
+        <span class="progress-block-value" style="color:${valColor}">${esc(displayVal)}${esc(unit)}</span>
+      </div>
+      <div class="progress-block-track" role="progressbar"
+           aria-valuenow="${p.value}" aria-valuemin="0" aria-valuemax="${max}"
+           aria-label="${esc(p.label)} ${esc(displayVal)}${esc(unit)}">
+        <div class="progress-block-fill progress-block-fill--${tone}" style="width:${pct}%"></div>
+      </div>
+      ${helperHTML}
+    </div>`;
+}
+
+function kpiCardHTML(p) {
+  const title = p.title ?? p.label ?? "";
+  const statusKey = p.status ?? "neutral";
+  const accentClr = p.accent ?? KPI_STATUS_COLOR[statusKey];
+  const subText = p.helperText ?? p.sub ?? "";
+
+  let displayValue = p.value;
+  if (typeof p.value === "number") {
+    displayValue = Number.isInteger(p.value)
+      ? p.value.toLocaleString("ko-KR")
+      : p.value.toFixed(1);
+  }
+
+  const statusBadge = p.statusText ? `
+    <span class="kpi-status-badge"
+          style="color:${KPI_STATUS_COLOR[statusKey]}; background:${KPI_STATUS_BG[statusKey]}; border:1px solid ${KPI_STATUS_COLOR[statusKey]}44">
+      ${esc(p.statusText)}
+    </span>` : "";
+
+  const trendKey = p.trendType ?? "flat";
+  const trendHTML = p.trendValue ? `
+    <span class="kpi-trend" style="color:${KPI_TREND_COLOR[trendKey]}">
+      ${KPI_TREND_ICON[trendKey]} ${esc(p.trendValue)}
+    </span>` : "";
+
+  const unitHTML = p.unit ? `<span class="kpi-unit">${esc(p.unit)}</span>` : "";
+
+  return `
+    <div class="kpi-card" data-kpi="${esc(p.key ?? "")}"
+         style="border:1px solid ${accentClr}33; box-shadow:0 0 20px ${accentClr}14;">
+      <div class="kpi-card-header">
+        <div class="kpi-label">${esc(title)}</div>
+        ${statusBadge}
+      </div>
+      <div class="kpi-value-row">
+        <span class="kpi-value" style="color:${accentClr}">${esc(displayValue)}</span>
+        ${unitHTML}
+      </div>
+      <div class="kpi-card-footer">
+        <div class="kpi-sub">${esc(subText)}</div>
+        ${trendHTML}
+      </div>
+    </div>`;
+}
+
+function renderKpiCards(kpiCards, cols = 4) {
+  return `
+    <div class="grid grid-${cols}" style="gap:10px">
+      ${kpiCards.map(kpiCardHTML).join("")}
+    </div>`;
+}
+
+/* [추가] QA NG 리스트 컬럼 (공통 detail table 재사용) */
+const QA_NG_LIST_COLUMNS = [
+  { key: "detectedAt", label: "검출시각", type: "datetime" },
+  { key: "lineName", label: "라인명", type: "text" },
+  { key: "boardId", label: "보드 ID", type: "id" },
+  { key: "defectType", label: "불량유형", type: "text" },
+  { key: "confidencePct", label: "신뢰도", type: "percent", align: "right" },
+  { key: "judgment", label: "판정", type: "status" },
+];
+
+/* [추가] NG 원본(time/board_id/cls/conf) -> QA 테이블 row */
+function toQaNgRows(ngList = []) {
+  return (ngList ?? []).map((r) => ({
+    detectedAt: `2026-03-14T${String(r.time ?? "00:00:00")}+09:00`,
+    lineName: `LINE ${String(r.board_id ?? "-").split("-")[0]}`,
+    boardId: r.board_id ?? "-",
+    defectType: r.cls ?? "-",
+    confidencePct: Number.isFinite(Number(r.conf)) ? Number(r.conf) * 100 : null,
+    judgment: "NG",
+  }));
+}
+
+/* [교체] renderWorker */
+function renderWorker({ lines = [], defects = [], ngList = [], kpis = [], statusData = null }) {
+  const statusKo = { RUN: "가동중", IDLE: "대기", DOWN: "정지" };
+
+  const statusRows = statusData?.worker?.equipment_status?.length
+    ? statusData.worker.equipment_status
+    : (lines ?? []).map((l) => ({ line: l.id, value: l.status, label: statusKo[l.status] ?? l.status ?? "알 수 없음" }));
+
+  const equipmentBadges = statusRows.length
+    ? statusRows.map((s) => statusBadgeHTML({ value: s.value, label: `L${s.line} ${s.label}` })).join("")
+    : `<div class="list-empty">데이터 없음</div>`;
+
+  const ngRows = (ngList ?? []).slice(0, 7).map((r) => {
+    const clsColor = defectColor(r.cls, defects);
+    const lineId = (r.board_id ?? "-").split("-")[0];
+    const confPct = Number.isFinite(Number(r.conf)) ? Math.floor(Number(r.conf) * 100) : "-";
+    return `
+      <div class="ng-row">
+        <span class="ng-time">${esc(r.time ?? "-")}</span>
+        <span class="ng-line">LINE ${esc(lineId)}</span>
+        <span class="ng-badge" style="background:${clsColor}22; color:${clsColor}; border:1px solid ${clsColor}44">${esc(r.cls ?? "-")}</span>
+        <span class="ng-conf">${esc(String(confPct))}${confPct === "-" ? "" : "%"}</span>
+        <span class="ng-tag">NG</span>
+      </div>`;
+  }).join("");
+
+  return `
+    <div class="screen">
+      <div class="grid grid-3" style="gap:10px">
+        ${kpis.length ? renderKpiCards(kpis, 3) : `<div class="list-empty">KPI 데이터 없음</div>`}
+      </div>
+
+      <div class="card">
+        <div class="section-title">설비 가동 상태</div>
+        <div class="equipment-status-group">${equipmentBadges}</div>
+      </div>
+
+      <div class="card">
+        <div class="section-title">최근 발생 유형 Top 3</div>
+        <div class="chart-wrap" style="height:170px">
+          <canvas id="workerTopDefectBarChart"></canvas>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="section-title">실시간 NG 로그</div>
+        ${ngRows || `<div class="list-empty">집계 기간 내 데이터 없음</div>`}
+      </div>
+    </div>`;
+}
+
+/* [교체] renderQA */
+function renderQA({ defects = [], hourly = [], ngList = [], kpis = [] }) {
+  const qaNgRows = toQaNgRows(ngList);
+  const qaNgTableHTML = renderDetailTable({
+    title: "NG 검출 리스트",
+    columns: QA_NG_LIST_COLUMNS,
+    rows: qaNgRows,
+    sortBy: { key: "detectedAt", type: "datetime", direction: "desc" },
+    emptyText: "NG 검출 데이터 없음",
+  });
+
+  return `
+    <div class="screen">
+      <div class="grid grid-2" style="gap:10px">
+        ${kpis.length ? renderKpiCards(kpis, 2) : `<div class="list-empty">KPI 데이터 없음</div>`}
+      </div>
+
+      <div class="grid grid-chart">
+        <div class="card">
+          <div class="section-title">시간대별 불량률 추이</div>
+          <div class="chart-wrap" style="height:210px"><canvas id="qaLineChart"></canvas></div>
+        </div>
+        <div class="card">
+          <div class="section-title">주요 불량 유형 Top 5</div>
+          <div class="chart-wrap" style="height:210px"><canvas id="qaBarChart"></canvas></div>
+        </div>
+      </div>
+
+      ${qaNgTableHTML}
+    </div>`;
+}
+
+/* [교체] renderManager */
+function renderManager({ lines = [], hourly = [], kpis = [] }) {
+  return `
+    <div class="screen">
+      <div class="grid grid-1" style="gap:10px">
+        ${kpis.length ? renderKpiCards(kpis, 1) : `<div class="list-empty">KPI 데이터 없음</div>`}
+      </div>
+
+      <div class="grid grid-chart">
+        <div class="card">
+          <div class="section-title">시간대별 생산량 / 불량률 추이</div>
+          <div class="chart-wrap" style="height:230px"><canvas id="managerHourlyChart"></canvas></div>
+        </div>
+        <div class="card">
+          <div class="section-title">라인별 생산량 비교</div>
+          <div class="chart-wrap" style="height:230px"><canvas id="managerLineBarChart"></canvas></div>
+        </div>
+      </div>
+    </div>`;
+}
+
+/* [교체] renderPromo */
+function renderPromo({ defects = [], hourly = [], kpis = [] }) {
+  const top3 = [...(defects ?? [])].sort((a, b) => (b.count ?? 0) - (a.count ?? 0)).slice(0, 3);
+  const topDefectRows = top3.length
+    ? top3.map((d, i) => `
+      <div class="promo-top-item">
+        <span>#${i + 1} ${esc(d.class_name ?? "-")}</span>
+        <strong>${formatChartNumber(d.count ?? 0)}건</strong>
+      </div>`).join("")
+    : `<div class="list-empty">집계 기간 내 데이터 없음</div>`;
+
+  return `
+    <div class="promo-screen">
+      <div class="promo-header">
+        <div class="promo-subtitle">Smart Factory PCB</div>
+        <h2 class="promo-title">오늘의 생산 현황</h2>
+        <div class="promo-clock" id="promoClock">00:00:00</div>
+      </div>
+
+      <div class="grid grid-3" style="gap:10px">
+        ${kpis.length ? renderKpiCards(kpis, 3) : `<div class="list-empty">KPI 데이터 없음</div>`}
+      </div>
+
+      <div class="grid" style="grid-template-columns:1fr 1fr; gap:16px; margin-top:16px">
+        <div class="card">
+          <div class="section-title">TOP 3 Defect Class</div>
+          ${topDefectRows}
+        </div>
+        <div class="card">
+          <div class="section-title">시간대별 생산 추이</div>
+          <div class="chart-wrap" style="height:160px"><canvas id="promoLineChart"></canvas></div>
+        </div>
+      </div>
+    </div>`;
+}
+
+/* [교체] startPromoTimers -> 시계만 유지 */
+function startPromoClockOnly() {
+  promoTimers.forEach(clearInterval);
+  promoTimers = [];
+  const updateClock = () => {
+    const el = document.getElementById("promoClock");
+    if (el) el.textContent = new Date().toLocaleTimeString("ko-KR");
+  };
+  updateClock();
+  promoTimers.push(setInterval(updateClock, 1000));
+}
+
+/* [추가] viewModel 렌더 헬퍼: 기존 렌더 함수 정의 하단에 추가 */
+
+function isExpiredMetric(metric) {
+  if (!metric?.validUntil) return false;
+  const t = new Date(metric.validUntil).getTime();
+  return Number.isFinite(t) && Date.now() > t;
+}
+
+function isRenderableMetric(metric) {
+  if (!metric) return false;
+  if (metric.sourceType !== "simulated") return true;
+  return Boolean(metric.validUntil && metric.modelVersion && metric.assumption && metric.caution);
+}
+
+function buildInsightMessages(metrics = []) {
+  return metrics
+    .filter(isRenderableMetric)
+    .map((m) => {
+      const expired = isExpiredMetric(m);
+      const validity = m.validUntil ? `유효: ${formatDateTimeDisplay(m.validUntil)}` : "";
+      return {
+        key: `msg_${m.key}`,
+        text: [m.presentation?.label ?? "-", m.description, validity, expired ? "재산출 필요" : ""].filter(Boolean).join(" · "),
+      };
+    });
+}
+
+function renderInsightMetricCard(metric) {
+  const badge = metric.presentation ?? { tone: "neutral", label: "중립" };
+  const expired = isExpiredMetric(metric);
+  const value = metric.displayValue ?? "-";
+
+  return `
+    <div class="kpi-card insight-card ${expired ? "insight-card--expired" : ""}" data-source="${esc(metric.sourceType)}" data-kind="${esc(metric.insightKind)}">
+      <div class="kpi-card-header">
+        <div class="kpi-label">${esc(metric.label ?? "-")}</div>
+        ${statusBadgeHTML({ tone: badge.tone, label: badge.label })}
+      </div>
+      <div class="kpi-value-row">
+        <span class="kpi-value">${esc(String(value))}</span>
+        ${metric.unit ? `<span class="kpi-unit">${esc(metric.unit)}</span>` : ""}
+      </div>
+      <div class="kpi-card-footer" style="display:block">
+        ${metric.description ? `<div class="insight-meta-row">${esc(metric.description)}</div>` : ""}
+        ${metric.caution ? `<div class="insight-meta-row insight-meta-row--caution">${esc(metric.caution)}</div>` : ""}
+        ${metric.assumption ? `<div class="insight-meta-row">가정: ${esc(metric.assumption)}</div>` : ""}
+        ${metric.modelVersion ? `<div class="insight-meta-row">모델: ${esc(metric.modelVersion)}</div>` : ""}
+        ${metric.validUntil ? `<div class="insight-meta-row">유효: ${esc(formatDateTimeDisplay(metric.validUntil))}${expired ? " · 재산출 필요" : ""}</div>` : ""}
+      </div>
+    </div>`;
+}
+
+function renderPlaceholderCard(metric) {
+  return `
+    <div class="card placeholder-card">
+      <div class="section-title">${esc(metric.label ?? "준비중")}</div>
+      <div class="detail-table-empty-state">시범 지표</div>
+      <div class="kpi-sub" style="margin-top:8px">${esc(metric.description ?? "데이터 연계 예정")}</div>
+      <div class="kpi-sub">${esc(metric.caution ?? "데이터 연계 예정")}</div>
+    </div>`;
+}
+
+function renderInsightGrid({ cards = [], simulated = [], placeholders = [] }, cols = 3) {
+  const primary = (cards || []).filter(isRenderableMetric).map(renderInsightMetricCard).join("");
+  const secondary = (simulated || []).filter(isRenderableMetric).map(renderInsightMetricCard).join("");
+  const placeholderHTML = (placeholders || []).map(renderPlaceholderCard).join("");
+
+  return `
+    <div class="grid grid-${cols}" style="gap:10px">${primary || `<div class="list-empty">표시 가능한 지표 없음</div>`}</div>
+    ${secondary ? `<div class="grid grid-${cols}" style="gap:10px; margin-top:10px">${secondary}</div>` : ""}
+    ${placeholderHTML ? `<div class="grid grid-${Math.min(cols, 2)}" style="gap:10px; margin-top:10px">${placeholderHTML}</div>` : ""}
+  `;
+}
+
+function renderInsightMessagesPanel(metrics = []) {
+  const messages = buildInsightMessages(metrics);
+  if (!messages.length) return `<div class="list-empty">해석 문구 없음</div>`;
+  return `
+    <div class="card">
+      <div class="section-title">해석 문구</div>
+      <div class="log-list-body">
+        ${messages.map((m) => `<div class="kpi-sub" style="margin-bottom:6px">${esc(m.text)}</div>`).join("")}
+      </div>
+    </div>`;
+}
+
+function renderWorkerFromViewModel(vm, raw) {
+  return `
+    <div class="screen">
+      ${renderInsightGrid(vm, 3)}
+      ${renderInsightMessagesPanel([...(vm.cards || [])])}
+      <div class="card">
+        <div class="section-title">최근 발생 유형 Top 3</div>
+        <div class="chart-wrap" style="height:170px"><canvas id="workerTopDefectBarChart"></canvas></div>
+      </div>
+      <div class="card">
+        <div class="section-title">실시간 NG 로그</div>
+        ${(raw.ngList || []).length ? (raw.ngList || []).slice(0, 7).map((r) => `
+          <div class="ng-row">
+            <span class="ng-time">${esc(r.time ?? "-")}</span>
+            <span class="ng-line">LINE ${esc(String(r.board_id ?? "-").split("-")[0])}</span>
+            <span class="ng-badge">${esc(r.cls ?? "-")}</span>
+            <span class="ng-conf">${esc(String(Math.floor((Number(r.conf) || 0) * 100)))}%</span>
+            <span class="ng-tag">NG</span>
+          </div>
+        `).join("") : `<div class="list-empty">집계 기간 내 데이터 없음</div>`}
+      </div>
+    </div>`;
+}
+
+function renderQAFromViewModel(vm, raw) {
+  const qaNgRows = toQaNgRows(raw.ngList || []);
+  const qaNgTableHTML = renderDetailTable({
+    title: "NG 검출 리스트",
+    columns: QA_NG_LIST_COLUMNS,
+    rows: qaNgRows,
+    sortBy: { key: "detectedAt", type: "datetime", direction: "desc" },
+    emptyText: "NG 검출 데이터 없음",
+  });
+
+  return `
+    <div class="screen">
+      ${renderInsightGrid(vm, 2)}
+      ${renderInsightMessagesPanel([...(vm.cards || []), ...(vm.placeholders || [])])}
+      <div class="grid grid-chart">
+        <div class="card">
+          <div class="section-title">시간대별 불량률 추이</div>
+          <div class="chart-wrap" style="height:210px"><canvas id="qaLineChart"></canvas></div>
+        </div>
+        <div class="card">
+          <div class="section-title">주요 불량 유형 Top 5</div>
+          <div class="chart-wrap" style="height:210px"><canvas id="qaBarChart"></canvas></div>
+        </div>
+      </div>
+      ${qaNgTableHTML}
+    </div>`;
+}
+
+function renderManagerFromViewModel(vm) {
+  return `
+    <div class="screen">
+      ${renderInsightGrid(vm, 3)}
+      ${renderInsightMessagesPanel([...(vm.cards || []), ...(vm.simulated || []), ...(vm.placeholders || [])])}
+      <div class="grid grid-chart">
+        <div class="card">
+          <div class="section-title">시간대별 생산량 / 불량률 추이</div>
+          <div class="chart-wrap" style="height:230px"><canvas id="managerHourlyChart"></canvas></div>
+        </div>
+        <div class="card">
+          <div class="section-title">라인별 생산량 비교</div>
+          <div class="chart-wrap" style="height:230px"><canvas id="managerLineBarChart"></canvas></div>
+        </div>
+      </div>
+    </div>`;
+}
+
+function renderPromoFromViewModel(vm, raw) {
+  return `
+    <div class="promo-screen">
+      <div class="promo-header">
+        <div class="promo-subtitle">Smart Factory PCB</div>
+        <h2 class="promo-title">오늘의 생산 현황</h2>
+        <div class="promo-clock" id="promoClock">00:00:00</div>
+      </div>
+      ${renderInsightGrid({ cards: vm.cards || [], simulated: [], placeholders: vm.placeholders || [] }, 3)}
+      <div class="grid" style="grid-template-columns:1fr 1fr; gap:16px; margin-top:16px">
+        <div class="card">
+          <div class="section-title">TOP 3 Defect Class</div>
+          ${[...(raw.defects || [])].sort((a, b) => (b.count || 0) - (a.count || 0)).slice(0, 3).map((d, i) => `
+            <div class="promo-top-item">
+              <span>#${i + 1} ${esc(d.class_name ?? "-")}</span>
+              <strong>${formatChartNumber(d.count ?? 0)}건</strong>
+            </div>
+          `).join("") || `<div class="list-empty">집계 기간 내 데이터 없음</div>`}
+        </div>
+        <div class="card">
+          <div class="section-title">시간대별 생산 추이</div>
+          <div class="chart-wrap" style="height:160px"><canvas id="promoLineChart"></canvas></div>
+        </div>
+      </div>
+    </div>`;
+}
+
+/* [교체] activateTab 함수 전체 교체 */
+function activateTab(tabId) {
+  if (currentTab === "promo") {
+    promoTimers.forEach(clearInterval);
+    promoTimers = [];
+  }
+
+  currentTab = tabId;
+
+  document.querySelectorAll(".tab-btn").forEach((btn) => {
+    const isActive = btn.dataset.tab === tabId;
+    btn.classList.toggle("active", isActive);
+    if (isActive) {
+      const tabDef = TABS.find((t) => t.id === tabId);
+      btn.style.setProperty("--tab-color", tabDef?.color ?? "#22d3a0");
+    }
+  });
+
+  const content = document.getElementById("content");
+  const vm = cache?.viewModel?.[tabId];
+
+  if (!vm) {
+    content.innerHTML = `<div class="list-empty">viewModel 없음</div>`;
+    return;
+  }
+
+  const raw = {
+    summary: cache.summary,
+    lines: cache.lines,
+    defects: cache.defects,
+    hourly: cache.hourly,
+    ngList: cache.ngList,
+    statusData: cache.statusData,
+  };
+
+  if (tabId === "worker") content.innerHTML = renderWorkerFromViewModel(vm, raw);
+  else if (tabId === "qa") content.innerHTML = renderQAFromViewModel(vm, raw);
+  else if (tabId === "manager") content.innerHTML = renderManagerFromViewModel(vm);
+  else if (tabId === "promo") content.innerHTML = renderPromoFromViewModel(vm, raw);
+  else content.innerHTML = `<div class="list-empty">탭 데이터 없음</div>`;
+
+  requestAnimationFrame(() => {
+    if (tabId === "worker") renderWorkerTopDefectBarChart("workerTopDefectBarChart", cache.defects);
+    if (tabId === "qa") {
+      renderDefectRateChart("qaLineChart", cache.hourly);
+      renderDefectBarChart("qaBarChart", cache.defects);
+    }
+    if (tabId === "manager") {
+      if (typeof renderHourlyChartWithSimulatedOverlay === "function") {
+        renderHourlyChartWithSimulatedOverlay("managerHourlyChart", cache.hourly, vm.simulated || []);
+      } else {
+        renderHourlyChart("managerHourlyChart", cache.hourly);
+      }
+      renderLineOutputChart("managerLineBarChart", cache.lines);
+    }
+    if (tabId === "promo") {
+      renderPromoLineChart("promoLineChart", cache.hourly);
+      startPromoClockOnly();
+    }
+  });
+}
+
+/**
+ * 앱 초기화 — DOM 로드 후 실행
+ * 1. API에서 전체 데이터 로드
+ * 2. 탭 이벤트 리스너 등록
+ * 3. 기본 탭(관리자) 활성화
+ */
+async function initApp() {
+  try {
+    // 모든 API 병렬 호출 (fetchAll: api.js)
+    cache = await fetchAll();
+
+    // 탭 버튼 클릭 이벤트 등록
+    document.querySelectorAll(".tab-btn").forEach(btn => {
+      btn.addEventListener("click", () => activateTab(btn.dataset.tab));
+    });
+
+    // 기본 탭 활성화
+    activateTab("manager");
+
+  } catch (err) {
+    // API 오류 시 에러 메시지 표시
+    document.getElementById("content").innerHTML = `
+      <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; height:60vh; color:#f87171; gap:12px">
+        <div style="font-size:32px">⚠</div>
+        <div>API 연결 실패: ${esc(err.message)}</div>
+        <div style="font-size:12px; color:#4a5d7a">FastAPI 서버가 실행 중인지 확인하세요</div>
+        <code style="font-size:11px; color:#6b7fa3">uvicorn backend.main:app --reload</code>
+      </div>`;
+  }
+}
+
+// DOM 준비 완료 후 앱 초기화 실행
+document.addEventListener("DOMContentLoaded", initApp);
+
+
+============================================================
+FILE: nginx/html/js/wed_dashboard/dashboard_charts.js
+============================================================
+/**
+ * charts.js — Chart.js 기반 차트 렌더링 함수
+ * ──────────────────────────────────────────────────────────
+ * 각 함수는 canvas 요소 ID와 데이터를 받아 차트를 그립니다.
+ * 차트 인스턴스를 Map에 저장해 탭 전환 시 destroy 후 재생성합니다.
+ */
+
+// 생성된 차트 인스턴스 저장 (메모리 누수 방지)
+const chartInstances = new Map();
+
+const CHART_TOKENS = {
+  grid: "#1e2d40",
+  gridSoft: "#1a2535",
+  border: "#1e2d40",
+  cardBg: "#0a111c",
+  tooltipBg: "#0a111cee",
+  textLabel: "#4a5d7a",
+  textBody: "#a0b4cc",
+  textMain: "#e2ecff",
+  green: "#22d3a0",
+  yellow: "#fbbf24",
+  red: "#f87171",
+  blueBar: "#1e3a5f",
+  blueBorder: "#2a4a7f",
+  cyan: "#22d3ee",
+  donutOther: "#3a4a5e",
+  fontMono: "'DM Mono', monospace",
+};
+
+/** 기존 차트를 파괴하고 새로 그리기 위한 준비 */
+function destroyChart(id) {
+  if (chartInstances.has(id)) {
+    chartInstances.get(id).destroy();
+    chartInstances.delete(id);
+  }
+}
+
+// Chart.js 전역 기본값 — 다크 테마에 맞게 조정
+Chart.defaults.color = CHART_TOKENS.textLabel;
+Chart.defaults.font.family = CHART_TOKENS.fontMono;
+Chart.defaults.plugins.legend.labels.boxWidth = 12;
+
+function formatChartNumber(value) {
+  const num = Number(value);
+  if (!Number.isFinite(num)) return "-";
+  return num.toLocaleString("ko-KR");
+}
+
+function formatChartPercent(value, decimals = 1) {
+  const num = Number(value);
+  if (!Number.isFinite(num)) return "-";
+  return num.toFixed(decimals);
+}
+
+function formatChartCompactTick(value) {
+  const num = Number(value);
+  if (!Number.isFinite(num)) return "";
+  if (Math.abs(num) >= 1000) return `${(num / 1000).toFixed(1)}k`;
+  return Number.isInteger(num) ? String(num) : String(num);
+}
+
+function formatChartTimeLabel(value) {
+  if (!value) return "-";
+  const text = String(value);
+  if (/^\d{2}:\d{2}(:\d{2})?$/.test(text)) return text.slice(0, 5);
+
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime())) return text;
+
+  const hh = String(date.getHours()).padStart(2, "0");
+  const mm = String(date.getMinutes()).padStart(2, "0");
+  return `${hh}:${mm}`;
+}
+
+function formatChartDateTime(value) {
+  if (!value) return "-";
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime())) return String(value);
+
+  const yyyy = date.getFullYear();
+  const mm = String(date.getMonth() + 1).padStart(2, "0");
+  const dd = String(date.getDate()).padStart(2, "0");
+  const hh = String(date.getHours()).padStart(2, "0");
+  const mi = String(date.getMinutes()).padStart(2, "0");
+  const ss = String(date.getSeconds()).padStart(2, "0");
+  return `${yyyy}-${mm}-${dd} ${hh}:${mi}:${ss}`;
+}
+
+function createChartInstance(canvasId, config) {
+  destroyChart(canvasId);
+  const ctx = document.getElementById(canvasId)?.getContext("2d");
+  if (!ctx) return null;
+
+  const chart = new Chart(ctx, config);
+  chartInstances.set(canvasId, chart);
+  return chart;
+}
+
+function createLineChart(canvasId, config) {
+  return createChartInstance(canvasId, { type: "line", ...config });
+}
+
+function createBarChart(canvasId, config) {
+  return createChartInstance(canvasId, { type: "bar", ...config });
+}
+
+function createDonutChart(canvasId, config) {
+  return createChartInstance(canvasId, { type: "doughnut", ...config });
+}
+
+function createLegendOptions(mode = "hidden") {
+  if (mode === "top-right") {
+    return {
+      display: true,
+      position: "top",
+      align: "end",
+      labels: {
+        boxWidth: 10,
+        padding: 12,
+        font: { size: 11 },
+      },
+    };
+  }
+
+  return { display: false };
+}
+
+function createTooltipOptions(opts = {}) {
+  const base = {
+    backgroundColor: CHART_TOKENS.tooltipBg,
+    borderColor: CHART_TOKENS.border,
+    borderWidth: 1,
+    titleColor: CHART_TOKENS.textLabel,
+    bodyColor: CHART_TOKENS.textBody,
+    padding: 10,
+    callbacks: opts.callbacks ?? {},
+  };
+  if (opts.mode !== undefined) base.mode = opts.mode;
+  if (opts.intersect !== undefined) base.intersect = opts.intersect;
+  return base;
+}
+
+function createTimeAxis(labels, opts = {}) {
+  const maxLabels = opts.maxLabels ?? 10;
+  const skipStep = labels.length > maxLabels ? Math.ceil(labels.length / maxLabels) : 1;
+
+  return {
+    grid: { color: opts.gridColor ?? CHART_TOKENS.grid },
+    ticks: {
+      color: opts.tickColor ?? CHART_TOKENS.textLabel,
+      font: { family: CHART_TOKENS.fontMono, size: 11 },
+      callback: (_value, idx) => (idx % skipStep === 0 ? formatChartTimeLabel(labels[idx]) : ""),
+      maxRotation: 0,
+      autoSkip: false,
+    },
+  };
+}
+
+function createValueAxis(opts = {}) {
+  return {
+    position: opts.position ?? "left",
+    beginAtZero: opts.beginAtZero ?? true,
+    grid: { color: opts.gridColor ?? CHART_TOKENS.grid, display: opts.gridDisplay ?? true },
+    min: opts.min,
+    max: opts.max,
+    suggestedMax: opts.suggestedMax,
+    ticks: {
+      color: opts.tickColor ?? CHART_TOKENS.textLabel,
+      font: { family: CHART_TOKENS.fontMono, size: 11 },
+      callback: opts.compact ? (value) => formatChartCompactTick(value) : undefined,
+    },
+    title: opts.title
+      ? {
+          display: true,
+          text: opts.title,
+          color: opts.titleColor ?? CHART_TOKENS.textLabel,
+          font: { size: 10 },
+        }
+      : undefined,
+  };
+}
+
+function createCountAxis(opts = {}) {
+  return {
+    beginAtZero: true,
+    grid: { color: opts.gridColor ?? CHART_TOKENS.grid, display: opts.gridDisplay ?? true },
+    ticks: {
+      color: opts.tickColor ?? CHART_TOKENS.textLabel,
+      font: { family: CHART_TOKENS.fontMono, size: 11 },
+    },
+  };
+}
+
+function createPercentAxis(opts = {}) {
+  return {
+    position: opts.position ?? "left",
+    min: opts.min ?? 0,
+    max: opts.max,
+    suggestedMax: opts.suggestedMax,
+    grid: { color: opts.gridColor ?? CHART_TOKENS.grid, display: opts.gridDisplay ?? true },
+    ticks: {
+      color: opts.tickColor ?? CHART_TOKENS.textLabel,
+      font: { family: CHART_TOKENS.fontMono, size: 11 },
+      callback: (value) => {
+        const txt = formatChartPercent(value, 1);
+        return txt === "-" ? "-" : `${txt}%`;
+      },
+    },
+    title: opts.title
+      ? {
+          display: true,
+          text: opts.title,
+          color: opts.titleColor ?? CHART_TOKENS.textLabel,
+          font: { size: 10 },
+        }
+      : undefined,
+  };
+}
+
+function prepareDonutDisplayData(items, opts = {}) {
+  const maxItems = opts.maxItems ?? 6;
+  let chartItems = [...(items ?? [])].sort((a, b) => b.value - a.value);
+
+  if (chartItems.length > maxItems) {
+    const topItems = chartItems.slice(0, maxItems);
+    const otherValue = chartItems.slice(maxItems).reduce((sum, item) => sum + (Number(item.value) || 0), 0);
+    topItems.push({ label: "기타", value: otherValue, color: CHART_TOKENS.donutOther });
+    chartItems = topItems;
+  }
+
+  const total = chartItems.reduce((sum, item) => sum + (Number(item.value) || 0), 0);
+  const legendItems = chartItems.map((item) => ({
+    ...item,
+    percentText: total ? `${((Number(item.value) || 0) / total * 100).toFixed(1)}%` : "",
+    valueText: formatChartNumber(item.value),
+  }));
+
+  return { chartItems, legendItems, total };
+}
+
+/* [추가] 기존 helper 영역 하단에 추가 */
+
+function renderCanvasEmpty(canvasId, message = "데이터 없음") {
+  destroyChart(canvasId);
+  const canvas = document.getElementById(canvasId);
+  if (!canvas) return null;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return null;
+
+  const w = canvas.width || canvas.clientWidth || 300;
+  const h = canvas.height || canvas.clientHeight || 150;
+  ctx.clearRect(0, 0, w, h);
+  ctx.save();
+  ctx.fillStyle = "#4a5d7a";
+  ctx.font = "12px 'DM Mono', monospace";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText(message, w / 2, h / 2);
+  ctx.restore();
+  return null;
+}
+
+/* [추가] Worker Top3 전용 수평 바 */
+function renderWorkerTopDefectBarChart(canvasId, defects) {
+  const rows = Array.isArray(defects) ? [...defects] : [];
+  if (!rows.length) return renderCanvasEmpty(canvasId, "집계 기간 내 데이터 없음");
+
+  const top3 = rows
+    .filter((d) => Number.isFinite(Number(d.count)))
+    .sort((a, b) => Number(b.count) - Number(a.count))
+    .slice(0, 3);
+
+  if (!top3.length) return renderCanvasEmpty(canvasId, "집계 기간 내 데이터 없음");
+
+  return createBarChart(canvasId, {
+    data: {
+      labels: top3.map((d) => d.class_name),
+      datasets: [
+        {
+          label: "불량 건수",
+          data: top3.map((d) => Number(d.count)),
+          backgroundColor: top3.map((d) => `${d.color}bb`),
+          borderColor: top3.map((d) => d.color),
+          borderWidth: 1,
+          borderRadius: 3,
+          borderSkipped: false,
+        },
+      ],
+    },
+    options: {
+      indexAxis: "y",
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: createLegendOptions("hidden"),
+        tooltip: createTooltipOptions({
+          callbacks: {
+            title: (items) => items[0]?.label ?? "-",
+            label: (item) => ` 건수: ${formatChartNumber(item.raw)}건`,
+          },
+        }),
+      },
+      scales: {
+        x: createCountAxis(),
+        y: {
+          grid: { display: false },
+          ticks: {
+            color: CHART_TOKENS.textBody,
+            font: { family: CHART_TOKENS.fontMono, size: 11 },
+          },
+        },
+      },
+    },
+  });
+}
+
+/* [교체] renderDefectRateChart */
+function renderDefectRateChart(canvasId, hourly) {
+  const rows = Array.isArray(hourly) ? hourly : [];
+  const actual = rows.filter((h) => h?.defect_rate !== null && h?.defect_rate !== undefined);
+  if (!actual.length) return renderCanvasEmpty(canvasId, "집계 기간 내 데이터 없음");
+
+  return createLineChart(canvasId, {
+    data: {
+      labels: actual.map((h) => formatChartTimeLabel(h.time)),
+      datasets: [{
+        label: "불량률(%)",
+        data: actual.map((h) => h.defect_rate),
+        borderColor: CHART_TOKENS.yellow,
+        backgroundColor: "rgba(251,191,36,0.08)",
+        borderWidth: 2.5,
+        pointRadius: 4,
+        pointBackgroundColor: CHART_TOKENS.yellow,
+        fill: true,
+      }],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: createLegendOptions("hidden"),
+        tooltip: createTooltipOptions({
+          callbacks: {
+            title: (items) => `시간: ${items[0].label}`,
+            label: (item) => ` 불량률: ${formatChartPercent(item.raw, 1)}%`,
+          },
+        }),
+      },
+      scales: {
+        x: createTimeAxis(actual.map((h) => formatChartTimeLabel(h.time))),
+        y: createPercentAxis({ max: 10 }),
+      },
+    },
+  });
+}
+
+/* [교체] renderDefectBarChart */
+function renderDefectBarChart(canvasId, defects) {
+  const rows = Array.isArray(defects) ? [...defects] : [];
+  if (!rows.length) return renderCanvasEmpty(canvasId, "집계 기간 내 데이터 없음");
+
+  const top5 = rows
+    .filter((d) => Number.isFinite(Number(d.count)))
+    .sort((a, b) => Number(b.count) - Number(a.count))
+    .slice(0, 5);
+
+  if (!top5.length) return renderCanvasEmpty(canvasId, "집계 기간 내 데이터 없음");
+
+  return createBarChart(canvasId, {
+    data: {
+      labels: top5.map((d) => d.class_name),
+      datasets: [{
+        label: "불량 건수",
+        data: top5.map((d) => Number(d.count)),
+        backgroundColor: top5.map((d) => `${d.color}bb`),
+        borderColor: top5.map((d) => d.color),
+        borderWidth: 1,
+        borderRadius: 3,
+        borderSkipped: false,
+      }],
+    },
+    options: {
+      indexAxis: "y",
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: createLegendOptions("hidden"),
+        tooltip: createTooltipOptions({
+          callbacks: {
+            title: (items) => items[0]?.label ?? "-",
+            label: (item) => ` 건수: ${formatChartNumber(item.raw)}건`,
+          },
+        }),
+      },
+      scales: {
+        x: createCountAxis(),
+        y: {
+          grid: { display: false },
+          ticks: { color: CHART_TOKENS.textBody, font: { family: CHART_TOKENS.fontMono, size: 11 } },
+        },
+      },
+    },
+  });
+}
+
+/* [교체] renderHourlyChart */
+function renderHourlyChart(canvasId, hourly) {
+  const rows = Array.isArray(hourly) ? hourly : [];
+  if (!rows.length) return renderCanvasEmpty(canvasId, "집계 기간 내 데이터 없음");
+
+  const labels = rows.map((h) => formatChartTimeLabel(h.time));
+  const produced = rows.map((h) => (h?.produced ?? null));
+  const defectRate = rows.map((h) => (h?.defect_rate ?? null));
+
+  return createBarChart(canvasId, {
+    data: {
+      labels,
+      datasets: [
+        {
+          label: "생산량",
+          data: produced,
+          backgroundColor: CHART_TOKENS.blueBar,
+          borderRadius: 3,
+          yAxisID: "y",
+        },
+        {
+          label: "불량률(%)",
+          data: defectRate,
+          type: "line",
+          borderColor: CHART_TOKENS.yellow,
+          backgroundColor: "transparent",
+          borderWidth: 2.5,
+          pointRadius: 4,
+          pointBackgroundColor: CHART_TOKENS.yellow,
+          spanGaps: false,
+          yAxisID: "y2",
+        },
+      ],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: createLegendOptions("top-right"),
+        tooltip: createTooltipOptions({
+          mode: "index",
+          intersect: false,
+          callbacks: {
+            title: (items) => `시간: ${items[0].label}`,
+            label: (item) => item.datasetIndex === 0
+              ? ` 생산량: ${formatChartNumber(item.raw)} pcs`
+              : ` 불량률: ${formatChartPercent(item.raw, 1)}%`,
+          },
+        }),
+      },
+      scales: {
+        x: createTimeAxis(labels),
+        y: createValueAxis({ title: "생산량 (pcs)", compact: true }),
+        y2: createPercentAxis({ position: "right", max: 10, gridDisplay: false, title: "불량률 (%)" }),
+      },
+    },
+  });
+}
+
+/* [교체] renderLineOutputChart */
+function renderLineOutputChart(canvasId, lines) {
+  const rows = Array.isArray(lines) ? lines : [];
+  if (!rows.length) return renderCanvasEmpty(canvasId, "집계 기간 내 데이터 없음");
+
+  const STATUS_CLR = { RUN: CHART_TOKENS.green, IDLE: CHART_TOKENS.yellow, DOWN: CHART_TOKENS.red };
+
+  return createBarChart(canvasId, {
+    data: {
+      labels: rows.map((l) => `LINE ${l.id}`),
+      datasets: [
+        {
+          label: "실적 (pcs)",
+          data: rows.map((l) => Number(l.produced ?? 0)),
+          backgroundColor: rows.map((l) => `${STATUS_CLR[l.status] ?? "#4a9eff"}99`),
+          borderColor: rows.map((l) => STATUS_CLR[l.status] ?? "#4a9eff"),
+          borderWidth: 1,
+          borderRadius: 4,
+          order: 1,
+        },
+        {
+          label: "계획 (pcs)",
+          data: rows.map((l) => Number(l.plan ?? 0)),
+          backgroundColor: CHART_TOKENS.blueBar,
+          borderColor: CHART_TOKENS.blueBorder,
+          borderWidth: 1,
+          borderRadius: 4,
+          order: 2,
+        },
+      ],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: createLegendOptions("top-right"),
+        tooltip: createTooltipOptions({
+          mode: "index",
+          intersect: false,
+          callbacks: {
+            label: (item) => ` ${item.dataset.label}: ${formatChartNumber(item.raw)} pcs`,
+            afterBody: (items) => {
+              const prod = items.find((i) => i.datasetIndex === 0);
+              const plan = items.find((i) => i.datasetIndex === 1);
+              if (!prod || !plan || !plan.raw) return [];
+              return [`달성률: ${formatChartPercent((prod.raw / plan.raw) * 100, 1)}%`];
+            },
+          },
+        }),
+      },
+      scales: {
+        x: { grid: { color: CHART_TOKENS.grid }, ticks: { color: CHART_TOKENS.textLabel, font: { size: 11 } } },
+        y: createValueAxis({ compact: true }),
+      },
+    },
+  });
+}
+
+/* [교체] renderPromoLineChart */
+function renderPromoLineChart(canvasId, hourly) {
+  const rows = Array.isArray(hourly) ? hourly : [];
+  const data = rows.filter((h) => h?.produced !== null && h?.produced !== undefined);
+  if (!data.length) return renderCanvasEmpty(canvasId, "집계 기간 내 데이터 없음");
+
+  return createLineChart(canvasId, {
+    data: {
+      labels: data.map((h) => formatChartTimeLabel(h.time)),
+      datasets: [{
+        label: "생산량",
+        data: data.map((h) => Number(h.produced)),
+        borderColor: CHART_TOKENS.cyan,
+        backgroundColor: "rgba(34,211,238,0.08)",
+        borderWidth: 3,
+        pointRadius: 0,
+        fill: true,
+      }],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: createLegendOptions("hidden"),
+        tooltip: createTooltipOptions({
+          callbacks: {
+            title: (items) => `시간: ${items[0].label}`,
+            label: (item) => ` 생산량: ${formatChartNumber(item.raw)} pcs`,
+          },
+        }),
+      },
+      scales: {
+        x: createTimeAxis(data.map((h) => formatChartTimeLabel(h.time)), { gridColor: CHART_TOKENS.gridSoft }),
+        y: createValueAxis({ compact: true, gridColor: CHART_TOKENS.gridSoft }),
+      },
+    },
+  });
+}
+
+// ──────────────────────────────────────────────────────────────
+// 9.5.3.7 범용 도넛차트
+// ──────────────────────────────────────────────────────────────
+
+/**
+ * 범용 도넛차트 (비중/구성비)
+ * @param {string} canvasId
+ * @param {Array}  items   - [{ label, value, color }]
+ * @param {object} [opts]
+ *   opts.centerText     - 중심 큰 텍스트 (null/undefined 이면 숨김)
+ *   opts.centerSubText  - 중심 하단 보조 텍스트
+ *   opts.maxItems       - 최대 항목 수, 초과 시 "기타" 합산 (기본 6)
+ *   opts.cutout         - 도넛 두께 (기본 "62%")
+ */
+function renderDonutChart(canvasId, items, opts = {}) {
+  const cutout = opts.cutout ?? "62%";
+  const { chartItems, total } = prepareDonutDisplayData(items, opts);
+
+  // 중심 수치 인라인 플러그인 (opts.centerText 있을 때만 등록)
+  const plugins = [];
+  if (opts.centerText != null) {
+    plugins.push({
+      id: "donutCenter",
+      beforeDraw(chart) {
+        const { ctx: c, chartArea } = chart;
+        const cx = chartArea.left + chartArea.width  / 2;
+        const cy = chartArea.top  + chartArea.height / 2;
+        const hasSub = Boolean(opts.centerSubText);
+        c.save();
+        c.textAlign    = "center";
+        c.textBaseline = "middle";
+        c.fillStyle    = CHART_TOKENS.textMain;
+        c.font         = `700 16px ${CHART_TOKENS.fontMono}`;
+        c.fillText(String(opts.centerText), cx, cy - (hasSub ? 9 : 0));
+        if (hasSub) {
+          c.fillStyle = CHART_TOKENS.textLabel;
+          c.font      = `400 10px ${CHART_TOKENS.fontMono}`;
+          c.fillText(String(opts.centerSubText), cx, cy + 12);
+        }
+        c.restore();
+      },
+    });
+  }
+
+  return createDonutChart(canvasId, {
+    data: {
+      labels: chartItems.map(d => d.label),
+      datasets: [{
+        data:             chartItems.map(d => d.value),
+        backgroundColor:  chartItems.map(d => d.color),
+        borderColor:      CHART_TOKENS.cardBg,
+        borderWidth:      2,
+        hoverBorderWidth: 3,
+      }],
+    },
+    options: {
+      responsive:          true,
+      maintainAspectRatio: false,
+      cutout,
+      plugins: {
+        legend: createLegendOptions("hidden"),
+        tooltip: createTooltipOptions({
+          callbacks: {
+            label: (item) => {
+              const ratio = total ? (Number(item.raw) / total) * 100 : 0;
+              return ` ${item.label}: ${formatChartNumber(item.raw)} (${ratio.toFixed(1)}%)`;
+            },
+          },
+        }),
+      },
+    },
+    plugins,
+  });
+}
+
+/* [추가] manager 전용 simulated overlay 함수 */
+
+function extractManagerPredictionSeries(hourly = [], simulatedMetrics = []) {
+  const riskMetric = (simulatedMetrics || []).find((m) => m.key === "sim_risk_score");
+  const predicted = (hourly || [])
+    .filter((h) => h?.predicted_defect !== null && h?.predicted_defect !== undefined)
+    .map((h) => ({ time: h.time, value: Number(h.predicted_defect) }));
+
+  return {
+    predicted,
+    riskLabel: riskMetric ? `참고용 위험도 ${riskMetric.displayValue}` : "참고용 예측선",
+  };
+}
+
+function renderHourlyChartWithSimulatedOverlay(canvasId, hourly = [], simulatedMetrics = []) {
+  const rows = Array.isArray(hourly) ? hourly : [];
+  const labels = rows.map((r) => r.time);
+  const produced = rows.map((r) => Number(r.produced) || 0);
+  const actualDefectRate = rows.map((r) =>
+    r.defect_rate === null || r.defect_rate === undefined ? null : Number(r.defect_rate)
+  );
+
+  const { predicted, riskLabel } = extractManagerPredictionSeries(rows, simulatedMetrics);
+  const predMap = new Map(predicted.map((p) => [p.time, p.value]));
+  const predictedSeries = labels.map((t) => (predMap.has(t) ? predMap.get(t) : null));
+
+  return createLineChart(canvasId, {
+    data: {
+      labels,
+      datasets: [
+        {
+          label: "생산량(실측)",
+          data: produced,
+          borderColor: CHART_TOKENS.cyan,
+          backgroundColor: `${CHART_TOKENS.cyan}22`,
+          yAxisID: "yCount",
+          tension: 0.25,
+          borderWidth: 2,
+          pointRadius: 2,
+        },
+        {
+          label: "불량률(실측)",
+          data: actualDefectRate,
+          borderColor: CHART_TOKENS.red,
+          backgroundColor: `${CHART_TOKENS.red}22`,
+          yAxisID: "yRate",
+          tension: 0.25,
+          borderWidth: 2,
+          pointRadius: 2,
+          spanGaps: true,
+        },
+        {
+          label: `${riskLabel} (예측)`,
+          data: predictedSeries,
+          borderColor: CHART_TOKENS.yellow,
+          backgroundColor: `${CHART_TOKENS.yellow}22`,
+          yAxisID: "yRate",
+          tension: 0.2,
+          borderWidth: 2,
+          pointRadius: 2,
+          spanGaps: true,
+          borderDash: [6, 4],
+        },
+      ],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: createLegendOptions("top-right"),
+        tooltip: createTooltipOptions(),
+      },
+      scales: {
+        x: createTimeAxis(labels),
+        yCount: createValueAxis({ position: "left", title: "생산량", compact: true }),
+        yRate: createPercentAxis({ position: "right", title: "불량률", gridDisplay: false, suggestedMax: 8 }),
+      },
+    },
+  });
+}
+
+
+============================================================
+FILE: nginx/html/js/wed_dashboard/dashboard_api.js
+============================================================
+/* [교체] KPI/상태/NG 스키마 정리 + fetchAll 반환 스키마 정리 */
+
+const MOCK_LINES = [
+  { id: "A", produced: 4200, plan: 5000, defect_rate: 2.1, status: "RUN" },
+  { id: "B", produced: 3950, plan: 5000, defect_rate: 3.8, status: "RUN" },
+  { id: "C", produced: 2870, plan: 5000, defect_rate: 4.5, status: "DOWN" },
+  { id: "D", produced: 2180, plan: 5000, defect_rate: 2.7, status: "IDLE" },
+];
+
+const MOCK_DEFECTS = [
+  { class_name: "short", count: 260, color: "#f87171" },
+  { class_name: "open", count: 120, color: "#fb923c" },
+  { class_name: "spur", count: 100, color: "#fbbf24" },
+  { class_name: "mousebite", count: 70, color: "#a3e635" },
+  { class_name: "spurious_copper", count: 50, color: "#22d3ee" },
+  { class_name: "pin_hole", count: 40, color: "#34d399" },
+];
+
+const MOCK_HOURLY = [
+  { time: "08:00", produced: 1200, defect_rate: 2.1, predicted_defect: null },
+  { time: "09:00", produced: 1380, defect_rate: 2.4, predicted_defect: null },
+  { time: "10:00", produced: 1450, defect_rate: 1.9, predicted_defect: null },
+  { time: "11:00", produced: 1310, defect_rate: 3.2, predicted_defect: null },
+  { time: "12:00", produced: 890, defect_rate: 2.8, predicted_defect: null },
+  { time: "13:00", produced: 1420, defect_rate: 2.5, predicted_defect: null },
+  { time: "14:00", produced: 1550, defect_rate: 2.2, predicted_defect: null },
+  { time: "15:00", produced: 1200, defect_rate: null, predicted_defect: 2.8 },
+  { time: "16:00", produced: 0, defect_rate: null, predicted_defect: 3.1 },
+  { time: "17:00", produced: 1000, defect_rate: null, predicted_defect: 3.0 },
+];
+
+const MOCK_NG_LIST = [
+  { time: "14:59:21", board_id: "B-0021", cls: "short", conf: 0.97 },
+  { time: "14:58:12", board_id: "A-0044", cls: "mousebite", conf: 0.88 },
+  { time: "14:57:31", board_id: "C-0033", cls: "spur", conf: 0.85 },
+  { time: "14:56:44", board_id: "B-0019", cls: "open", conf: 0.91 },
+];
+
+const MOCK_SUMMARY = {
+  total_produced: 13200,
+  total_plan: 20000,
+  achievement_rate: 66.0,
+  inspection_qty: 8420,
+  good_qty: 8065,
+  defect_qty: 355,
+  defect_rate: 4.2,
+};
+
+/* [교체] build 계층 + viewModel 조립 블록 */
+
+const MODEL_VERSION = "rule-v1.0.1";
+
+const SOURCE_TYPE = {
+  ACTUAL: "actual",
+  DERIVED: "derived",
+  SIMULATED: "simulated",
+  PLACEHOLDER: "placeholder",
+};
+
+const INSIGHT_KIND = {
+  STATUS: "status",
+  RATIO: "ratio",
+  PREDICTION: "prediction",
+  ALERT: "alert",
+  ACTION: "action",
+};
+
+const ALLOWED_INSIGHT_KIND = new Set(Object.values(INSIGHT_KIND));
+
+function fmtNum(n) {
+  const num = Number(n);
+  if (!Number.isFinite(num)) return "-";
+  return num.toLocaleString("ko-KR");
+}
+function fmtPct(n, dec = 1) {
+  const num = Number(n);
+  if (!Number.isFinite(num)) return "-";
+  return `${num.toFixed(dec)}%`;
+}
+function isoAfterMinutes(minutes) {
+  return new Date(Date.now() + minutes * 60 * 1000).toISOString();
+}
+
+function buildPresentation(sourceType, insightKind) {
+  if (sourceType === SOURCE_TYPE.ACTUAL) return { tone: "normal", label: "실측" };
+  if (sourceType === SOURCE_TYPE.DERIVED) return { tone: "warning", label: insightKind === INSIGHT_KIND.RATIO ? "추정" : "계산" };
+  if (sourceType === SOURCE_TYPE.SIMULATED) return { tone: insightKind === INSIGHT_KIND.ALERT ? "danger" : "neutral", label: insightKind === INSIGHT_KIND.PREDICTION ? "예측" : "참고용" };
+  return { tone: "neutral", label: "준비중" };
+}
+
+function createMetric(item) {
+  return {
+    key: item.key,
+    topic: item.topic || item.key,
+    label: item.label,
+    value: item.value,
+    displayValue: item.displayValue ?? String(item.value ?? "-"),
+    unit: item.unit ?? "",
+    sourceType: item.sourceType,
+    insightKind: item.insightKind,
+    basisTimeRange: item.basisTimeRange ?? "최근 로그 기준",
+    description: item.description ?? "",
+    caution: item.caution ?? "",
+    validUntil: item.validUntil ?? null,
+    modelVersion: item.modelVersion ?? null,
+    assumption: item.assumption ?? null,
+    isUserActionRequired: Boolean(item.isUserActionRequired),
+    priority: item.priority ?? 50,
+    presentation: buildPresentation(item.sourceType, item.insightKind),
+  };
+}
+
+function validateInsightKind(items = []) {
+  return items.filter((item) => ALLOWED_INSIGHT_KIND.has(item.insightKind));
+}
+
+function filterRenderableSimulated(items = []) {
+  return items.filter((m) => {
+    if (m.sourceType !== SOURCE_TYPE.SIMULATED) return true;
+    return Boolean(m.validUntil && m.modelVersion && m.assumption && m.caution);
+  });
+}
+
+function buildActualMetrics(raw) {
+  const { summary, lines } = raw;
+  const downCount = (lines || []).filter((l) => l.status === "DOWN").length;
+  const idleCount = (lines || []).filter((l) => l.status === "IDLE").length;
+
+  return validateInsightKind([
+    createMetric({
+      key: "actual_total_produced",
+      topic: "production_output",
+      label: "누적 생산량",
+      value: summary.total_produced,
+      displayValue: fmtNum(summary.total_produced),
+      unit: "pcs",
+      sourceType: SOURCE_TYPE.ACTUAL,
+      insightKind: INSIGHT_KIND.STATUS,
+      description: "당일 누적 생산량 실측치",
+    }),
+    createMetric({
+      key: "actual_total_plan",
+      topic: "production_output",
+      label: "목표 생산량",
+      value: summary.total_plan,
+      displayValue: fmtNum(summary.total_plan),
+      unit: "pcs",
+      sourceType: SOURCE_TYPE.ACTUAL,
+      insightKind: INSIGHT_KIND.STATUS,
+      description: "당일 계획 생산량",
+    }),
+    createMetric({
+      key: "actual_defect_rate",
+      topic: "defect_rate",
+      label: "현재 불량률",
+      value: summary.defect_rate,
+      displayValue: fmtPct(summary.defect_rate),
+      unit: "%",
+      sourceType: SOURCE_TYPE.ACTUAL,
+      insightKind: INSIGHT_KIND.STATUS,
+      description: "검사 수량 대비 현재 불량률 실측치",
+    }),
+    createMetric({
+      key: "actual_line_down_count",
+      topic: "line_health",
+      label: "정지 라인 수",
+      value: downCount,
+      displayValue: fmtNum(downCount),
+      unit: "라인",
+      sourceType: SOURCE_TYPE.ACTUAL,
+      insightKind: INSIGHT_KIND.STATUS,
+      description: "현재 상태가 DOWN인 라인 수",
+    }),
+    createMetric({
+      key: "actual_line_idle_count",
+      topic: "line_health",
+      label: "대기 라인 수",
+      value: idleCount,
+      displayValue: fmtNum(idleCount),
+      unit: "라인",
+      sourceType: SOURCE_TYPE.ACTUAL,
+      insightKind: INSIGHT_KIND.STATUS,
+      description: "현재 상태가 IDLE인 라인 수",
+    }),
+  ]);
+}
+
+function buildDerivedMetrics(raw) {
+  const { summary, ngList = [] } = raw;
+  const achievement = Number(summary.total_plan) > 0
+    ? (Number(summary.total_produced) / Number(summary.total_plan)) * 100
+    : null;
+  const yieldRate = Number(summary.inspection_qty) > 0
+    ? (Number(summary.good_qty) / Number(summary.inspection_qty)) * 100
+    : null;
+  const recheckCandidateCount = ngList.filter((r) => Number(r.conf) < 0.9).length;
+
+  return validateInsightKind([
+    createMetric({
+      key: "derived_achievement_rate",
+      topic: "production_output",
+      label: "목표 달성률",
+      value: achievement,
+      displayValue: fmtPct(achievement),
+      unit: "%",
+      sourceType: SOURCE_TYPE.DERIVED,
+      insightKind: INSIGHT_KIND.RATIO,
+      basisTimeRange: "당일 00:00~현재",
+      description: "실측 생산량/계획 생산량 고정식 계산값",
+      caution: "추정(계산값)",
+    }),
+    createMetric({
+      key: "derived_yield_rate",
+      topic: "yield",
+      label: "양품률(Yield)",
+      value: yieldRate,
+      displayValue: fmtPct(yieldRate),
+      unit: "%",
+      sourceType: SOURCE_TYPE.DERIVED,
+      insightKind: INSIGHT_KIND.RATIO,
+      basisTimeRange: "당일 검사 로그 기준",
+      description: "양품/검사수량 고정식 계산값",
+      caution: "추정(계산값)",
+    }),
+    createMetric({
+      key: "derived_recheck_candidates",
+      topic: "recheck",
+      label: "재검 후보 수",
+      value: recheckCandidateCount,
+      displayValue: fmtNum(recheckCandidateCount),
+      unit: "건",
+      sourceType: SOURCE_TYPE.DERIVED,
+      insightKind: INSIGHT_KIND.ACTION,
+      basisTimeRange: "최근 NG 로그 기준",
+      description: "신뢰도 90% 미만 로그 집계",
+      caution: "추정(집계값)",
+    }),
+  ]);
+}
+
+function buildSimulatedPredictions(raw, actualMetrics, derivedMetrics) {
+  const defectRate = actualMetrics.find((m) => m.key === "actual_defect_rate")?.value ?? 0;
+  const recheckCount = derivedMetrics.find((m) => m.key === "derived_recheck_candidates")?.value ?? 0;
+  const baseRisk = Math.min(100, Math.round(Number(defectRate) * 12 + Number(recheckCount) * 2));
+
+  const simulated = validateInsightKind([
+    createMetric({
+      key: "sim_risk_score",
+      topic: "risk",
+      label: "단기 위험도",
+      value: baseRisk,
+      displayValue: `${baseRisk}점`,
+      unit: "점",
+      sourceType: SOURCE_TYPE.SIMULATED,
+      insightKind: INSIGHT_KIND.PREDICTION,
+      basisTimeRange: "최근 60분 로그 기준",
+      validUntil: isoAfterMinutes(30),
+      modelVersion: MODEL_VERSION,
+      assumption: "최근 30분 추세가 동일하게 유지된다고 가정",
+      caution: "참고용 추정치이며 실측값이 아님",
+      description: "룰 기반 추정 위험도",
+      isUserActionRequired: baseRisk >= 70,
+      priority: baseRisk >= 70 ? 10 : 40,
+    }),
+    createMetric({
+      key: "sim_urgent_check_recommend",
+      topic: "line_health",
+      label: "긴급 점검 권장",
+      value: baseRisk >= 70 ? "권장" : "모니터링",
+      displayValue: baseRisk >= 70 ? "긴급 점검 권장" : "지속 모니터링",
+      sourceType: SOURCE_TYPE.SIMULATED,
+      insightKind: INSIGHT_KIND.ALERT,
+      basisTimeRange: "최근 라인 상태/불량 로그 기준",
+      validUntil: isoAfterMinutes(20),
+      modelVersion: MODEL_VERSION,
+      assumption: "라인 정지/불량 증가 패턴이 단기 유지된다고 가정",
+      caution: "실제 알람 이벤트가 아닌 참고용 권고",
+      description: "룰 기반 알람 권고",
+      isUserActionRequired: baseRisk >= 70,
+      priority: baseRisk >= 70 ? 5 : 45,
+    }),
+    createMetric({
+      key: "sim_recheck_priority",
+      topic: "recheck",
+      label: "재검 우선순위 제안",
+      value: recheckCount > 0 ? "상위 5건 우선 확인" : "우선 항목 없음",
+      displayValue: recheckCount > 0 ? "상위 5건 우선 확인 권장" : "우선 확인 항목 없음",
+      sourceType: SOURCE_TYPE.SIMULATED,
+      insightKind: INSIGHT_KIND.ACTION,
+      basisTimeRange: "최근 NG/confidence 로그 기준",
+      validUntil: isoAfterMinutes(30),
+      modelVersion: MODEL_VERSION,
+      assumption: "confidence 낮은 순으로 우선 대응한다고 가정",
+      caution: "참고용 우선순위이며 확정 지시가 아님",
+      description: "룰 기반 재검 순서 제안",
+      isUserActionRequired: recheckCount > 0,
+      priority: recheckCount > 0 ? 15 : 60,
+    }),
+  ]);
+
+  return filterRenderableSimulated(simulated);
+}
+
+function buildPlaceholderCards() {
+  return [
+    createMetric({
+      key: "ph_cpk_trend",
+      topic: "quality_capability",
+      label: "공정 능력 지수(Cpk) 추이",
+      value: null,
+      displayValue: "준비중",
+      sourceType: SOURCE_TYPE.PLACEHOLDER,
+      insightKind: INSIGHT_KIND.RATIO,
+      description: "측정 규격 상/하한 데이터 연계 예정",
+      caution: "데이터 연계 예정",
+    }),
+    createMetric({
+      key: "ph_cost_panel",
+      topic: "cost",
+      label: "생산 원가",
+      value: null,
+      displayValue: "준비중",
+      sourceType: SOURCE_TYPE.PLACEHOLDER,
+      insightKind: INSIGHT_KIND.RATIO,
+      description: "원가 데이터 연계 예정",
+      caution: "데이터 연계 예정",
+    }),
+  ];
+}
+
+function buildViewModel({ raw, actualMetrics, derivedMetrics, simulatedInsights, placeholderCards }) {
+  return {
+    worker: {
+      cards: [...actualMetrics, ...derivedMetrics].filter((m) => ["production_output", "line_health", "defect_rate"].includes(m.topic)),
+      simulated: [],
+      placeholders: [],
+      chartData: { lines: raw.lines, defects: raw.defects, hourly: raw.hourly, ngList: raw.ngList },
+    },
+    qa: {
+      cards: [...actualMetrics, ...derivedMetrics].filter((m) => ["defect_rate", "yield", "recheck"].includes(m.topic)),
+      simulated: [],
+      placeholders: placeholderCards.filter((m) => m.topic === "quality_capability"),
+      chartData: { defects: raw.defects, hourly: raw.hourly, ngList: raw.ngList },
+    },
+    manager: {
+      cards: [...actualMetrics, ...derivedMetrics].filter((m) => ["production_output", "yield", "line_health"].includes(m.topic)),
+      simulated: simulatedInsights,
+      placeholders: placeholderCards.filter((m) => m.topic === "cost"),
+      chartData: { lines: raw.lines, hourly: raw.hourly, simulatedOverlay: simulatedInsights },
+    },
+    promo: {
+      cards: [...actualMetrics, ...derivedMetrics].filter((m) => ["production_output", "yield", "defect_rate"].includes(m.topic)),
+      simulated: [],
+      placeholders: [],
+      chartData: { defects: raw.defects, hourly: raw.hourly },
+    },
+  };
+}
+
+async function fetchKpiCards() {
+  return {};
+}
+async function fetchStatusData() {
+  return {
+    worker: {
+      equipment_status: MOCK_LINES.map((l) => ({
+        line: l.id,
+        value: l.status,
+        label: l.status === "RUN" ? "가동중" : l.status === "IDLE" ? "대기" : "정지",
+      })),
+    },
+  };
+}
+
+async function fetchAll() {
+  const raw = {
+    summary: MOCK_SUMMARY,
+    lines: MOCK_LINES,
+    defects: MOCK_DEFECTS,
+    hourly: MOCK_HOURLY,
+    ngList: MOCK_NG_LIST,
+    kpiCards: await fetchKpiCards(),
+    statusData: await fetchStatusData(),
+  };
+
+  const actualMetrics = buildActualMetrics(raw);
+  const derivedMetrics = buildDerivedMetrics(raw);
+  const simulatedInsights = buildSimulatedPredictions(raw, actualMetrics, derivedMetrics);
+  const placeholderCards = buildPlaceholderCards();
+
+  const viewModel = buildViewModel({
+    raw,
+    actualMetrics,
+    derivedMetrics,
+    simulatedInsights,
+    placeholderCards,
+  });
+
+  return {
+    ...raw,
+    layers: {
+      actualMetrics,
+      derivedMetrics,
+      simulatedInsights,
+      placeholderCards,
+    },
+    viewModel,
+    meta: {
+      generatedAt: new Date().toISOString(),
+      sourcePolicyVersion: "source-policy-v1",
+      simulatedDefault: "manager-only",
+    },
+  };
+}
+
+
+============================================================
+FILE: nginx/html/css/wed_dashboard/dashboard_style.css
+============================================================
+/*
+ * style.css — PCB Dashboard 전체 스타일
+ * ──────────────────────────────────────────────────────────
+ * 디자인 토큰은 :root CSS 변수로 관리 → 한 곳만 수정하면 전체 반영
+ * 반응형: Mobile(<768) / Tablet(768~1024) / Desktop(>1024)
+ */
+
+/* ── CSS 변수 (디자인 토큰) ─────────────────────────────── */
+:root {
+  --bg-app:    #080e18;
+  --bg-card:   #0c1520;
+  --bg-deep:   #0a111c;
+  --bg-bar:    #1e2d40;
+  --border:    #1a2840;
+  --border-md: #1e2d40;
+
+  --text-label: #4a5d7a;
+  --text-muted: #6b7fa3;
+  --text-body:  #a0b4cc;
+  --text-main:  #e2ecff;
+
+  --blue:   #4a9eff;
+  --cyan:   #22d3ee;
+  --green:  #22d3a0;
+  --yellow: #fbbf24;
+  --red:    #f87171;
+  --orange: #fb923c;
+  --purple: #a78bfa;
+  --lime:   #a3e635;
+
+  --font-mono: 'DM Mono', monospace;
+  --font-sans: 'DM Sans', sans-serif;
+  --font-orb:  'Orbitron', monospace;
+
+  --radius-card:  14px;
+  --radius-inner: 10px;
+}
+
+/* ── 리셋 & 기본 ────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  background: var(--bg-app);
+  color: var(--text-main);
+  font-family: var(--font-sans);
+  min-height: 100vh;
+  -webkit-tap-highlight-color: transparent; /* 모바일 탭 하이라이트 제거 */
+}
+
+::-webkit-scrollbar { width: 4px; height: 4px; }
+::-webkit-scrollbar-track { background: var(--bg-app); }
+::-webkit-scrollbar-thumb { background: var(--border-md); border-radius: 4px; }
+
+/* ── 탭 바 ──────────────────────────────────────────────── */
+#tab-bar {
+  display: flex;
+  align-items: stretch;
+  background: var(--bg-deep);
+  border-bottom: 1px solid var(--border-md);
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  height: 50px;
+}
+
+#brand {
+  display: flex;
+  align-items: center;
+  padding: 0 16px;
+  border-right: 1px solid var(--border-md);
+  margin-right: 4px;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-label);
+  letter-spacing: 1px;
+  white-space: nowrap;
+}
+
+/* 탭 버튼 공통 */
+.tab-btn {
+  flex: none;
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0 18px;
+  min-width: 100px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-label);
+  border-bottom: 2px solid transparent;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  transition: color 0.2s, border-color 0.2s;
+}
+
+/* 활성 탭 색상은 JS에서 --tab-color 변수를 동적으로 주입 */
+.tab-btn.active { color: var(--tab-color, var(--green)); border-bottom-color: var(--tab-color, var(--green)); }
+
+.tab-emoji { font-size: 16px; }
+.tab-label { font-size: 11px; }
+
+/* LIVE 인디케이터 */
+#live-indicator {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0 14px;
+}
+#live-dot {
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: var(--green);
+  box-shadow: 0 0 6px var(--green);
+  animation: pulse 2s infinite;
+}
+#live-text { color: var(--green); font-size: 11px; letter-spacing: 1px; }
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.4; }
+}
+
+/* ── 콘텐츠 영역 ────────────────────────────────────────── */
+#content { overflow-x: hidden; }
+
+/* ── 로딩 ────────────────────────────────────────────────── */
+#loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 60vh;
+  color: var(--text-label);
+  gap: 16px;
+}
+.spinner {
+  width: 40px; height: 40px;
+  border: 3px solid var(--border-md);
+  border-top-color: var(--green);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ── 공통 레이아웃 ──────────────────────────────────────── */
+.screen { padding: 20px; display: flex; flex-direction: column; gap: 14px; }
+
+/* 그리드 헬퍼 */
+.grid { display: grid; gap: 10px; }
+.grid-2 { grid-template-columns: repeat(2, 1fr); }
+.grid-3 { grid-template-columns: repeat(3, 1fr); }
+.grid-4 { grid-template-columns: repeat(4, 1fr); }
+.grid-5 { grid-template-columns: repeat(5, 1fr); }
+.grid-6 { grid-template-columns: repeat(6, 1fr); }
+.grid-chart { grid-template-columns: 1.4fr 1fr; gap: 14px; }
+
+/* ── 카드 ──────────────────────────────────────────────── */
+.card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  padding: 16px;
+}
+
+/* 섹션 제목 (소형 대문자) */
+.section-title {
+  color: var(--text-label);
+  font-size: 10px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  margin-bottom: 14px;
+  font-family: var(--font-sans);
+}
+
+/* ── KPI 카드 ──────────────────────────────────────────── */
+.kpi-card {
+  background: linear-gradient(135deg, #0f1923 60%, #131f2e);
+  border-radius: var(--radius-card);
+  padding: 16px 20px;
+  min-height: 90px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+}
+.kpi-label {
+  font-size: 10px;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  color: var(--text-label);
+  font-family: var(--font-sans);
+}
+.kpi-value {
+  font-size: 26px;
+  font-weight: 700;
+  font-family: var(--font-mono);
+  line-height: 1;
+  margin: 6px 0;
+}
+.kpi-sub { font-size: 11px; color: var(--text-label); }
+
+/* ── 경고 배너 ──────────────────────────────────────────── */
+.alert-banner {
+  background: linear-gradient(90deg, #2d0a00, #3d1500);
+  border: 1px solid var(--red);
+  border-radius: var(--radius-inner);
+  padding: 10px 16px;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  box-shadow: 0 0 20px #f8717144;
+}
+.alert-icon { font-size: 20px; flex-shrink: 0; }
+.alert-title { color: #fca5a5; font-size: 13px; font-weight: 700; }
+.alert-msg   { color: var(--red); font-size: 12px; margin-top: 2px; }
+.alert-time  { color: var(--red); font-size: 11px; flex-shrink: 0; margin-left: auto; }
+
+/* ── Defect 바 리스트 ───────────────────────────────────── */
+.defect-bar-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 9px;
+}
+.defect-bar-label { width: 105px; font-size: 11px; color: var(--text-muted); text-align: right; flex-shrink: 0; }
+.defect-bar-track { flex: 1; height: 18px; background: var(--bg-bar); border-radius: 4px; overflow: hidden; }
+.defect-bar-fill  { height: 100%; border-radius: 4px; transition: width 1.2s ease; }
+.defect-bar-count { width: 28px; font-size: 13px; font-weight: 700; text-align: right; flex-shrink: 0; }
+
+/* ── NG 로그 리스트 ─────────────────────────────────────── */
+.ng-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 0;
+  border-bottom: 1px solid var(--border);
+}
+.ng-time  { font-size: 11px; color: var(--text-label); font-family: var(--font-mono); flex-shrink: 0; }
+.ng-line  { font-size: 11px; color: #506070; flex-shrink: 0; }
+.ng-badge {
+  border-radius: 5px;
+  padding: 1px 8px;
+  font-size: 11px;
+  font-family: var(--font-mono);
+  flex: 1;
+}
+.ng-conf  { font-size: 11px; color: var(--text-label); flex-shrink: 0; }
+.ng-tag   { font-size: 11px; font-weight: 700; color: var(--red); flex-shrink: 0; }
+
+/* ── 최근 이벤트/알람 로그 리스트 (9.5.3.8) ─────────────── */
+.log-list-head,
+.log-list-row {
+  display: grid;
+  grid-template-columns: 84px 74px 92px minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+}
+
+.log-list-head {
+  padding: 0 0 8px;
+  border-bottom: 1px solid var(--border-md);
+  color: var(--text-label);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.log-list-body {
+  max-height: 260px;
+  overflow-y: auto;
+}
+
+.log-list-row {
+  padding: 10px 0;
+  border-bottom: 1px solid #1a2535;
+}
+
+.log-list-time,
+.log-list-line {
+  font-size: 11px;
+  color: var(--text-label);
+  font-family: var(--font-mono);
+}
+
+.log-list-status .status-badge {
+  padding: 2px 8px;
+}
+
+.log-list-message {
+  min-width: 0;
+  color: var(--text-body);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.log-list-empty {
+  padding: 10px 0;
+  color: var(--text-label);
+  font-size: 12px;
+}
+
+/* ── 라인 현황 카드 ─────────────────────────────────────── */
+.line-card {
+  background: var(--bg-deep);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-inner);
+  padding: 11px 13px;
+  margin-bottom: 10px;
+}
+.line-badge {
+  width: 40px; height: 40px;
+  border-radius: 8px;
+  display: flex; align-items: center; justify-content: center;
+  font-weight: 800; font-size: 13px;
+  font-family: var(--font-mono);
+  flex-shrink: 0;
+}
+.line-info { flex: 1; min-width: 0; }
+.line-produced { font-size: 14px; font-weight: 700; font-family: var(--font-mono); color: #c0d0e8; }
+.line-produced small { font-size: 11px; color: var(--text-label); }
+.line-status-badge { border-radius: 5px; padding: 2px 9px; font-size: 11px; font-weight: 700; }
+.progress-track { flex: 1; height: 5px; background: var(--bg-bar); border-radius: 4px; overflow: hidden; }
+.progress-fill  { height: 100%; border-radius: 4px; transition: width 1s ease; }
+
+/* ── 리스크 게이지 ──────────────────────────────────────── */
+.risk-gauge-wrap {
+  background: var(--bg-deep);
+  border-radius: 12px;
+  padding: 14px;
+  text-align: center;
+}
+.risk-label { color: var(--text-label); font-size: 10px; margin-bottom: 10px; font-family: var(--font-sans); }
+.risk-donut {
+  border-radius: 50%;
+  margin: 0 auto 10px;
+  display: flex; align-items: center; justify-content: center;
+}
+.risk-inner {
+  border-radius: 50%;
+  background: var(--bg-deep);
+  display: flex; align-items: center; justify-content: center;
+}
+.risk-pct { font-size: 13px; font-weight: 700; font-family: var(--font-mono); }
+.risk-count { font-size: 12px; color: var(--text-muted); }
+
+/* ── NG 테이블 ──────────────────────────────────────────── */
+.ng-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.ng-table th {
+  color: var(--text-label);
+  text-align: left;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border-md);
+  font-weight: 600;
+  font-size: 11px;
+}
+.ng-table td { padding: 8px 10px; border-bottom: 1px solid #1a2535; }
+.ng-table .td-time { color: var(--text-label); font-family: var(--font-mono); }
+.ng-table .td-id   { color: var(--text-body);  font-family: var(--font-mono); }
+.ng-table .td-conf { color: #c0d0e8; font-family: var(--font-mono); }
+
+/* ── 상세 테이블 (9.5.3.9) ─────────────────────────────── */
+.detail-table-wrap {
+  max-height: 360px;
+  overflow-y: auto;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.detail-table {
+  width: 100%;
+  min-width: 760px;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.detail-table th {
+  color: var(--text-label);
+  text-align: left;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border-md);
+  font-weight: 600;
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.detail-table td {
+  padding: 8px 10px;
+  border-bottom: 1px solid #1a2535;
+  vertical-align: middle;
+}
+
+.detail-table-th--right,
+.detail-table-td--right {
+  text-align: right;
+}
+
+.detail-table-mono {
+  color: var(--text-body);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.detail-table-num {
+  color: #c0d0e8;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.detail-table-text {
+  display: inline-block;
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-body);
+}
+
+.detail-table-td--status .status-badge {
+  padding: 2px 8px;
+}
+
+.detail-table-empty,
+.detail-table-empty-state {
+  color: var(--text-label);
+  font-size: 12px;
+}
+
+.detail-table-empty-state {
+  padding: 10px 0;
+}
+
+/* ── 차트 컨테이너 ──────────────────────────────────────── */
+.chart-wrap { position: relative; width: 100%; }
+
+/* ── 홍보 스크린 전용 ───────────────────────────────────── */
+.promo-screen {
+  min-height: calc(100vh - 50px);
+  padding: 28px;
+  background: radial-gradient(ellipse at 20% 20%, #001a2c 0%, #000d18 60%, #0a0014 100%);
+}
+.promo-header { text-align: center; margin-bottom: 30px; }
+.promo-subtitle { color: var(--cyan); font-size: 10px; letter-spacing: 4px; text-transform: uppercase; margin-bottom: 6px; }
+.promo-title { font-size: 26px; font-weight: 900; color: var(--text-main); letter-spacing: 1px; font-family: var(--font-orb); }
+.promo-clock { color: var(--cyan); font-size: 28px; font-weight: 700; margin-top: 6px; font-family: var(--font-orb); }
+
+.promo-kpi-card {
+  background: rgba(255,255,255,0.04);
+  border-radius: var(--radius-card);
+  padding: 22px 20px;
+  text-align: center;
+}
+.promo-kpi-label { color: var(--text-label); font-size: 9px; letter-spacing: 2px; text-transform: uppercase; margin-bottom: 8px; }
+.promo-kpi-value { font-weight: 900; font-family: var(--font-orb); line-height: 1; font-size: 36px; }
+
+.top-defect-panel {
+  background: rgba(255,255,255,0.03);
+  border-radius: 16px;
+  padding: 24px;
+  text-align: center;
+  transition: border-color 0.5s, box-shadow 0.5s;
+}
+.top-defect-rank {
+  display: inline-block;
+  border-radius: 10px;
+  padding: 4px 16px;
+  margin-bottom: 10px;
+  color: var(--text-label);
+  font-size: 12px;
+}
+.top-defect-name {
+  font-size: 40px;
+  font-weight: 900;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  font-family: var(--font-orb);
+}
+.top-defect-count { color: var(--text-muted); font-size: 15px; margin-top: 8px; }
+.top-defect-dots  { display: flex; justify-content: center; gap: 8px; margin-top: 14px; }
+.dot {
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  background: var(--bg-bar);
+  transition: background 0.3s;
+}
+.dot.active { background: var(--dot-color); }
+
+.promo-chart-panel {
+  background: rgba(255,255,255,0.03);
+  border: 1px solid var(--border-md);
+  border-radius: 16px;
+  padding: 24px;
+}
+
+/* ── 반응형 ─────────────────────────────────────────────── */
+@media (max-width: 767px) {
+  #brand { display: none; }
+
+  .tab-btn {
+    flex: 1;
+    padding: 0 4px;
+    min-width: 0;
+    font-size: 11px;
+  }
+  .tab-emoji { font-size: 20px; }
+  .tab-label { font-size: 9px; }
+  #live-text { display: none; }
+
+  .screen { padding: 14px; }
+
+  .grid-4, .grid-5, .grid-6 { grid-template-columns: repeat(2, 1fr); }
+  .grid-3 { grid-template-columns: repeat(2, 1fr); }
+  .grid-chart { grid-template-columns: 1fr; }
+
+  .kpi-value { font-size: 28px; }
+  .kpi-card  { min-height: 100px; padding: 18px 16px; }
+
+  .defect-bar-label { width: 90px; }
+
+  .risk-donut  { width: 52px !important; height: 52px !important; }
+  .risk-inner  { width: 38px !important; height: 38px !important; }
+  .risk-pct    { font-size: 12px !important; }
+
+  .promo-screen { padding: 16px; }
+  .promo-title  { font-size: 20px; }
+  .promo-clock  { font-size: 22px; }
+  .promo-kpi-value { font-size: 28px; }
+  .promo-kpi-card  { padding: 16px 14px; }
+  .top-defect-name { font-size: 32px; }
+  .top-defect-panel, .promo-chart-panel { padding: 18px; }
+
+  .line-badge { width: 44px !important; height: 44px !important; }
+}
+
+@media (min-width: 768px) and (max-width: 1023px) {
+  .grid-5 { grid-template-columns: repeat(3, 1fr); }
+  .grid-6 { grid-template-columns: repeat(3, 1fr); }
+}
+
+
+/* ── KPI 카드 확장 (9.5.3.3) ────────────────────────────── */
+
+.kpi-card-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+
+.kpi-status-badge {
+  border-radius: 4px;
+  padding: 1px 7px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.kpi-value-row {
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+  margin-bottom: 8px;
+}
+
+.kpi-unit {
+  font-size: 13px;
+  color: var(--text-label);
+  font-family: var(--font-mono);
+  font-weight: 400;
+}
+
+.kpi-card-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.kpi-trend {
+  font-size: 11px;
+  font-family: var(--font-mono);
+  font-weight: 700;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.kpi-card-footer .kpi-sub {
+  margin: 0;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* [추가] 파일 하단에 추가 (기존 .ng-row 계열은 유지, 덮어쓰기 최소화) */
+
+.list-empty {
+  padding: 10px 0;
+  color: var(--text-label);
+  font-size: 12px;
+}
+
+.promo-top-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-body);
+  font-size: 13px;
+}
+
+.promo-top-item strong {
+  color: var(--text-main);
+  font-family: var(--font-mono);
+  font-weight: 700;
+}
+
+/* [추가] insight card 스타일 */
+
+.insight-card[data-source="simulated"] {
+  border-color: #6b7fa344;
+  box-shadow: 0 0 0 1px #6b7fa322 inset;
+}
+
+.insight-card[data-source="derived"] {
+  border-style: dashed;
+}
+
+.insight-card--expired {
+  opacity: 0.58;
+  filter: grayscale(0.35);
+}
+
+.insight-meta-row {
+  font-size: 10px;
+  color: var(--text-label);
+  line-height: 1.35;
+  margin-top: 3px;
+}
+
+.insight-meta-row--caution {
+  color: #fbbf24;
+}
+
+.placeholder-card {
+  border-style: dashed;
+  border-color: #6b7fa355;
+  background: linear-gradient(135deg, #0e1725 50%, #121d2c);
+}
+
+
+============================================================
+FILE: /home/orugu/Docker/Final_project_rss/docs/db_inventory/20260314_150341_all_tables.txt
+============================================================
+                           List of relations
+       Schema       |           Name           |    Type     |  Owner   
+--------------------+--------------------------+-------------+----------
+ information_schema | sql_features             | table       | FP_ADMIN
+ information_schema | sql_implementation_info  | table       | FP_ADMIN
+ information_schema | sql_parts                | table       | FP_ADMIN
+ information_schema | sql_sizing               | table       | FP_ADMIN
+ pg_catalog         | pg_aggregate             | table       | FP_ADMIN
+ pg_catalog         | pg_am                    | table       | FP_ADMIN
+ pg_catalog         | pg_amop                  | table       | FP_ADMIN
+ pg_catalog         | pg_amproc                | table       | FP_ADMIN
+ pg_catalog         | pg_attrdef               | table       | FP_ADMIN
+ pg_catalog         | pg_attribute             | table       | FP_ADMIN
+ pg_catalog         | pg_auth_members          | table       | FP_ADMIN
+ pg_catalog         | pg_authid                | table       | FP_ADMIN
+ pg_catalog         | pg_cast                  | table       | FP_ADMIN
+ pg_catalog         | pg_class                 | table       | FP_ADMIN
+ pg_catalog         | pg_collation             | table       | FP_ADMIN
+ pg_catalog         | pg_constraint            | table       | FP_ADMIN
+ pg_catalog         | pg_conversion            | table       | FP_ADMIN
+ pg_catalog         | pg_database              | table       | FP_ADMIN
+ pg_catalog         | pg_db_role_setting       | table       | FP_ADMIN
+ pg_catalog         | pg_default_acl           | table       | FP_ADMIN
+ pg_catalog         | pg_depend                | table       | FP_ADMIN
+ pg_catalog         | pg_description           | table       | FP_ADMIN
+ pg_catalog         | pg_enum                  | table       | FP_ADMIN
+ pg_catalog         | pg_event_trigger         | table       | FP_ADMIN
+ pg_catalog         | pg_extension             | table       | FP_ADMIN
+ pg_catalog         | pg_foreign_data_wrapper  | table       | FP_ADMIN
+ pg_catalog         | pg_foreign_server        | table       | FP_ADMIN
+ pg_catalog         | pg_foreign_table         | table       | FP_ADMIN
+ pg_catalog         | pg_index                 | table       | FP_ADMIN
+ pg_catalog         | pg_inherits              | table       | FP_ADMIN
+ pg_catalog         | pg_init_privs            | table       | FP_ADMIN
+ pg_catalog         | pg_language              | table       | FP_ADMIN
+ pg_catalog         | pg_largeobject           | table       | FP_ADMIN
+ pg_catalog         | pg_largeobject_metadata  | table       | FP_ADMIN
+ pg_catalog         | pg_namespace             | table       | FP_ADMIN
+ pg_catalog         | pg_opclass               | table       | FP_ADMIN
+ pg_catalog         | pg_operator              | table       | FP_ADMIN
+ pg_catalog         | pg_opfamily              | table       | FP_ADMIN
+ pg_catalog         | pg_parameter_acl         | table       | FP_ADMIN
+ pg_catalog         | pg_partitioned_table     | table       | FP_ADMIN
+ pg_catalog         | pg_policy                | table       | FP_ADMIN
+ pg_catalog         | pg_proc                  | table       | FP_ADMIN
+ pg_catalog         | pg_publication           | table       | FP_ADMIN
+ pg_catalog         | pg_publication_namespace | table       | FP_ADMIN
+ pg_catalog         | pg_publication_rel       | table       | FP_ADMIN
+ pg_catalog         | pg_range                 | table       | FP_ADMIN
+ pg_catalog         | pg_replication_origin    | table       | FP_ADMIN
+ pg_catalog         | pg_rewrite               | table       | FP_ADMIN
+ pg_catalog         | pg_seclabel              | table       | FP_ADMIN
+ pg_catalog         | pg_sequence              | table       | FP_ADMIN
+ pg_catalog         | pg_shdepend              | table       | FP_ADMIN
+ pg_catalog         | pg_shdescription         | table       | FP_ADMIN
+ pg_catalog         | pg_shseclabel            | table       | FP_ADMIN
+ pg_catalog         | pg_statistic             | table       | FP_ADMIN
+ pg_catalog         | pg_statistic_ext         | table       | FP_ADMIN
+ pg_catalog         | pg_statistic_ext_data    | table       | FP_ADMIN
+ pg_catalog         | pg_subscription          | table       | FP_ADMIN
+ pg_catalog         | pg_subscription_rel      | table       | FP_ADMIN
+ pg_catalog         | pg_tablespace            | table       | FP_ADMIN
+ pg_catalog         | pg_transform             | table       | FP_ADMIN
+ pg_catalog         | pg_trigger               | table       | FP_ADMIN
+ pg_catalog         | pg_ts_config             | table       | FP_ADMIN
+ pg_catalog         | pg_ts_config_map         | table       | FP_ADMIN
+ pg_catalog         | pg_ts_dict               | table       | FP_ADMIN
+ pg_catalog         | pg_ts_parser             | table       | FP_ADMIN
+ pg_catalog         | pg_ts_template           | table       | FP_ADMIN
+ pg_catalog         | pg_type                  | table       | FP_ADMIN
+ pg_catalog         | pg_user_mapping          | table       | FP_ADMIN
+ pg_toast           | pg_toast_1213            | TOAST table | FP_ADMIN
+ pg_toast           | pg_toast_1247            | TOAST table | FP_ADMIN
+ pg_toast           | pg_toast_1255            | TOAST table | FP_ADMIN
+ pg_toast           | pg_toast_1260            | TOAST table | FP_ADMIN
+ pg_toast           | pg_toast_1262            | TOAST table | FP_ADMIN
+ pg_toast           | pg_toast_13457           | TOAST table | FP_ADMIN
+ pg_toast           | pg_toast_13462           | TOAST table | FP_ADMIN
+ pg_toast           | pg_toast_13467           | TOAST table | FP_ADMIN
+ pg_toast           | pg_toast_13472           | TOAST table | FP_ADMIN
+ pg_toast           | pg_toast_1417            | TOAST table | FP_ADMIN
+ pg_toast           | pg_toast_1418            | TOAST table | FP_ADMIN
+ pg_toast           | pg_toast_16410           | TOAST table | FP_ADMIN
+ pg_toast           | pg_toast_16417           | TOAST table | FP_ADMIN
+ pg_toast           | pg_toast_16461           | TOAST table | FP_ADMIN
+ pg_toast           | pg_toast_16478           | TOAST table | FP_ADMIN
+ pg_toast           | pg_toast_16483           | TOAST table | FP_ADMIN
+ pg_toast           | pg_toast_16494           | TOAST table | FP_ADMIN
+ pg_toast           | pg_toast_16502           | TOAST table | FP_ADMIN
+ pg_toast           | pg_toast_16508           | TOAST table | FP_ADMIN
+ pg_toast           | pg_toast_16525           | TOAST table | FP_ADMIN
+ pg_toast           | pg_toast_16548           | TOAST table | FP_ADMIN
+ pg_toast           | pg_toast_16566           | TOAST table | FP_ADMIN
+ pg_toast           | pg_toast_16576           | TOAST table | FP_ADMIN
+ pg_toast           | pg_toast_2328            | TOAST table | FP_ADMIN
+ pg_toast           | pg_toast_2396            | TOAST table | FP_ADMIN
+ pg_toast           | pg_toast_2600            | TOAST table | FP_ADMIN
+ pg_toast           | pg_toast_2604            | TOAST table | FP_ADMIN
+ pg_toast           | pg_toast_2606            | TOAST table | FP_ADMIN
+ pg_toast           | pg_toast_2609            | TOAST table | FP_ADMIN
+ pg_toast           | pg_toast_2612            | TOAST table | FP_ADMIN
+ pg_toast           | pg_toast_2615            | TOAST table | FP_ADMIN
+ pg_toast           | pg_toast_2618            | TOAST table | FP_ADMIN
+ pg_toast           | pg_toast_2619            | TOAST table | FP_ADMIN
+ pg_toast           | pg_toast_2620            | TOAST table | FP_ADMIN
+ pg_toast           | pg_toast_2964            | TOAST table | FP_ADMIN
+ pg_toast           | pg_toast_3079            | TOAST table | FP_ADMIN
+ pg_toast           | pg_toast_3118            | TOAST table | FP_ADMIN
+ pg_toast           | pg_toast_3256            | TOAST table | FP_ADMIN
+ pg_toast           | pg_toast_3350            | TOAST table | FP_ADMIN
+ pg_toast           | pg_toast_3381            | TOAST table | FP_ADMIN
+ pg_toast           | pg_toast_3394            | TOAST table | FP_ADMIN
+ pg_toast           | pg_toast_3429            | TOAST table | FP_ADMIN
+ pg_toast           | pg_toast_3456            | TOAST table | FP_ADMIN
+ pg_toast           | pg_toast_3466            | TOAST table | FP_ADMIN
+ pg_toast           | pg_toast_3592            | TOAST table | FP_ADMIN
+ pg_toast           | pg_toast_3596            | TOAST table | FP_ADMIN
+ pg_toast           | pg_toast_3600            | TOAST table | FP_ADMIN
+ pg_toast           | pg_toast_6000            | TOAST table | FP_ADMIN
+ pg_toast           | pg_toast_6100            | TOAST table | FP_ADMIN
+ pg_toast           | pg_toast_6106            | TOAST table | FP_ADMIN
+ pg_toast           | pg_toast_6243            | TOAST table | FP_ADMIN
+ pg_toast           | pg_toast_826             | TOAST table | FP_ADMIN
+ public             | defect_logs              | table       | FP_ADMIN
+ public             | defect_type              | table       | FP_ADMIN
+ public             | environment_logs         | table       | FP_ADMIN
+ public             | equipment                | table       | FP_ADMIN
+ public             | face_embedding_table     | table       | FP_ADMIN
+ public             | items                    | table       | FP_ADMIN
+ public             | lines                    | table       | FP_ADMIN
+ public             | ml_predictions           | table       | FP_ADMIN
+ public             | notifications            | table       | FP_ADMIN
+ public             | product_models           | table       | FP_ADMIN
+ public             | production_logs          | table       | FP_ADMIN
+ public             | prompt_permission_list   | table       | FP_ADMIN
+ public             | user_table               | table       | FP_ADMIN
+ public             | vector_table             | table       | FP_ADMIN
+ public             | vision_result            | table       | FP_ADMIN
+(135 rows)
+
+
+
+============================================================
+FILE: /home/orugu/Docker/Final_project_rss/docs/db_inventory/20260314_150341_columns.tsv
+============================================================
+defect_logs	1	defect_id	integer	NO	nextval('defect_logs_defect_id_seq'::regclass)
+defect_logs	2	line_id	integer	NO	
+defect_logs	3	model_id	character varying	NO	
+defect_logs	4	detected_by	character varying	YES	
+defect_logs	5	defect_class	character varying	YES	
+defect_logs	6	inspection_qty	integer	YES	
+defect_logs	7	good_qty	integer	YES	
+defect_logs	8	recorded_at	timestamp without time zone	YES	
+defect_logs	9	defect_qty	integer	YES	
+defect_type	1	class_id	character varying	YES	
+defect_type	2	class_name	character varying	YES	
+defect_type	3	desc	character varying	YES	
+environment_logs	1	env_id	integer	NO	nextval('environment_logs_env_id_seq'::regclass)
+environment_logs	2	line_id	integer	YES	
+environment_logs	3	temperature	double precision	YES	
+environment_logs	4	humidity	double precision	YES	
+environment_logs	5	recorded_at	timestamp without time zone	YES	
+equipment	1	equipment_id	integer	NO	nextval('equipment_equipment_id_seq'::regclass)
+equipment	2	equipment_name	character varying	YES	
+equipment	3	status	character varying	YES	
+equipment	4	last_checked_at	timestamp without time zone	YES	
+equipment	5	line_id	integer	YES	
+face_embedding_table	1	employee_no	character varying	NO	
+face_embedding_table	2	embedding_json	character varying	NO	
+face_embedding_table	3	embedding_id	integer	NO	nextval('face_embedding_table_embedding_id_seq'::regclass)
+items	1	id	integer	NO	nextval('items_id_seq'::regclass)
+items	2	title	character varying	NO	
+items	3	description	character varying	YES	
+lines	1	line_id	integer	NO	nextval('lines_line_id_seq'::regclass)
+lines	2	line_name	character varying	YES	
+lines	3	status	character varying	YES	
+lines	4	current_model_id	character varying	YES	
+ml_predictions	1	pred_id	integer	NO	nextval('ml_predictions_pred_id_seq'::regclass)
+ml_predictions	2	line_id	integer	NO	nextval('ml_predictions_line_id_seq'::regclass)
+ml_predictions	3	pred_type	character varying	YES	
+ml_predictions	4	predicted_value	double precision	YES	
+ml_predictions	5	predicted_at	timestamp without time zone	YES	
+ml_predictions	6	valid_until	timestamp without time zone	YES	
+notifications	1	noti_id	integer	NO	nextval('notifications_noti_id_seq'::regclass)
+notifications	2	line_id	integer	YES	
+notifications	3	target_role	character varying	YES	
+notifications	4	level	integer	YES	
+notifications	5	message	character varying	YES	
+notifications	6	triggered_at	timestamp without time zone	YES	
+notifications	7	expires_at	timestamp without time zone	YES	
+notifications	8	is_dismissed	boolean	YES	
+product_models	2	model_name	character varying	YES	
+product_models	3	alert_threshold	double precision	YES	
+product_models	4	danger_threshold	double precision	YES	
+product_models	5	unit	character varying	YES	
+product_models	6	model_id	character varying	NO	
+production_logs	1	log_id	bigint	NO	nextval('production_logs_log_id_seq'::regclass)
+production_logs	2	line_id	integer	NO	
+production_logs	3	model_id	character varying	NO	
+production_logs	4	produced_qty	integer	YES	
+user_table	1	employee_no	character varying	NO	
+user_table	2	password_hash	character varying	YES	
+user_table	3	id_active	boolean	YES	
+user_table	4	id_locked	boolean	YES	
+user_table	5	login_fail_count	bigint	YES	
+user_table	6	token_version	bigint	YES	
+user_table	7	join_date	timestamp without time zone	YES	
+user_table	8	last_login	timestamp without time zone	YES	
+user_table	9	role	character varying	YES	
+user_table	10	name	character varying	YES	
+user_table	12	line_id	integer	NO	nextval('user_table_line_id_seq'::regclass)
+vector_table	1	employee_no	character varying	YES	
+vector_table	2	face_embedding	tsvector	YES	
+vision_result	1	id	integer	YES	
+vision_result	2	request_id	character varying	YES	
+vision_result	3	image_path	character varying	YES	
+vision_result	4	result_status	character varying	YES	
+vision_result	5	defect_type	character varying	YES	
+vision_result	6	confidence	double precision	YES	
+vision_result	7	created_at	date	YES	
+
+
+============================================================
+FILE: /home/orugu/Docker/Final_project_rss/docs/db_inventory/20260314_150341_constraints.tsv
+============================================================
+defect_logs	detected_by	FOREIGN KEY	user_table	employee_no
+defect_logs	line_id	FOREIGN KEY	lines	line_id
+defect_logs	model_id	FOREIGN KEY	product_models	model_id
+defect_logs	defect_id	PRIMARY KEY	defect_logs	defect_id
+environment_logs	line_id	FOREIGN KEY	lines	line_id
+equipment	line_id	FOREIGN KEY	lines	line_id
+face_embedding_table	employee_no	FOREIGN KEY	user_table	employee_no
+face_embedding_table	employee_no	PRIMARY KEY	face_embedding_table	employee_no
+items	id	PRIMARY KEY	items	id
+lines	current_model_id	FOREIGN KEY	product_models	model_id
+lines	line_id	PRIMARY KEY	lines	line_id
+ml_predictions	line_id	FOREIGN KEY	lines	line_id
+notifications	line_id	FOREIGN KEY	lines	line_id
+product_models	model_id	PRIMARY KEY	product_models	model_id
+production_logs	line_id	FOREIGN KEY	lines	line_id
+production_logs	model_id	FOREIGN KEY	product_models	model_id
+production_logs	log_id	PRIMARY KEY	production_logs	log_id
+user_table	line_id	FOREIGN KEY	lines	line_id
+user_table	employee_no	PRIMARY KEY	user_table	employee_no
+vector_table	employee_no	FOREIGN KEY	user_table	employee_no
+
+
+============================================================
+FILE: /home/orugu/Docker/Final_project_rss/docs/db_inventory/20260314_150341_databases.txt
+============================================================
+                                                          List of databases
+       Name       |  Owner   | Encoding | Locale Provider |  Collate   |   Ctype    | ICU Locale | ICU Rules |   Access privileges   
+------------------+----------+----------+-----------------+------------+------------+------------+-----------+-----------------------
+ Final_Project_DB | FP_ADMIN | UTF8     | libc            | en_US.utf8 | en_US.utf8 |            |           | 
+ postgres         | FP_ADMIN | UTF8     | libc            | en_US.utf8 | en_US.utf8 |            |           | 
+ template0        | FP_ADMIN | UTF8     | libc            | en_US.utf8 | en_US.utf8 |            |           | =c/FP_ADMIN          +
+                  |          |          |                 |            |            |            |           | FP_ADMIN=CTc/FP_ADMIN
+ template1        | FP_ADMIN | UTF8     | libc            | en_US.utf8 | en_US.utf8 |            |           | =c/FP_ADMIN          +
+                  |          |          |                 |            |            |            |           | FP_ADMIN=CTc/FP_ADMIN
+(4 rows)
+
+
+
+============================================================
+FILE: server_api/src/modules/dashboard/service.py
+============================================================
+# server_api/src/modules/dashboard/service.py
+
+from fastapi import HTTPException
+
+from src.modules.dashboard.cache import DashboardCache
+from src.modules.dashboard.constants import DEFAULT_REFRESH_INTERVAL, SCREEN_ID_MAP
+from src.modules.dashboard.evaluator import evaluate_kpi
+from src.modules.dashboard.repository import DashboardRepository
+from src.modules.dashboard.schemas import DashboardKPIResponse, KPIInput
+
+
+def dashboard_status_placeholder() -> dict:
+    return {
+        "module": "dashboard",
+        "message": "Dashboard KPI polling service is ready.",
+    }
+
+
+def get_cache_key(screen: str) -> str:
+    return f"dashboard:kpis:{screen}"
+
+
+def get_fallback_data(screen: str, repo: DashboardRepository) -> list[KPIInput]:
+    if screen == "worker":
+        return repo.get_recent_worker_kpis()
+    if screen == "promo":
+        return repo.get_recent_promo_kpis()
+    return []
+
+
+def deserialize_kpis(raw_items: list[dict]) -> list[KPIInput]:
+    return [KPIInput.model_validate(item) for item in raw_items]
+
+
+def aggregate_kpi_data(
+    screen: str,
+    repo: DashboardRepository,
+    cache: DashboardCache,
+) -> DashboardKPIResponse:
+    cache_key = get_cache_key(screen)
+    cached = cache.get_json(cache_key)
+
+    if cached and "items" in cached:
+        raw_items = deserialize_kpis(cached["items"])
+        refresh_interval = int(cached.get("refresh_interval", DEFAULT_REFRESH_INTERVAL))
+    else:
+        raw_items = get_fallback_data(screen, repo)
+        refresh_interval = DEFAULT_REFRESH_INTERVAL
+
+    evaluated_items = [
+        evaluate_kpi(item, refresh_interval=refresh_interval)
+        for item in raw_items
+    ]
+
+    return DashboardKPIResponse(
+        screen=screen,
+        screenId=SCREEN_ID_MAP[screen],
+        refreshInterval=refresh_interval,
+        items=evaluated_items,
+    )
+
+
+def get_dashboard_kpis(
+    screen: str,
+    repo: DashboardRepository | None = None,
+    cache: DashboardCache | None = None,
+) -> DashboardKPIResponse:
+    repo = repo or DashboardRepository()
+    cache = cache or DashboardCache()
+
+    if screen not in SCREEN_ID_MAP:
+        raise HTTPException(status_code=400, detail=f"Unsupported screen: {screen}")
+
+    return aggregate_kpi_data(screen=screen, repo=repo, cache=cache)
+
+============================================================
+FILE: server_api/src/modules/dashboard/router.py
+============================================================
+# server_api/src/modules/dashboard/router.py
+
+from fastapi import APIRouter, Query
+
+from src.modules.dashboard.schemas import DashboardKPIResponse
+from src.modules.dashboard.service import dashboard_status_placeholder, get_dashboard_kpis
+
+router = APIRouter(prefix="/dashboard", tags=["dashboard"])
+
+
+@router.get("/status")
+def dashboard_status():
+    return dashboard_status_placeholder()
+
+
+@router.get("/kpis", response_model=DashboardKPIResponse)
+def read_dashboard_kpis(
+    screen: str = Query(..., pattern="^(worker|qa|manager|promo)$"),
+) -> DashboardKPIResponse:
+    return get_dashboard_kpis(screen=screen)
+

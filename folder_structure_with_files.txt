@@ -1,0 +1,244 @@
+.
+├── .env
+├── .gitignore
+├── .pytest_cache
+│   ├── .gitignore
+│   ├── CACHEDIR.TAG
+│   ├── README.md
+│   └── v
+│       └── cache
+│           ├── lastfailed
+│           ├── nodeids
+│           └── stepwise
+├── DB_Structure.erd
+├── compose.yml
+├── docs
+│   ├── 9.2.2 역할별 화면 목적 정리.md
+│   ├── 9.2.3 공용 레이아웃 및 컴포넌트 정리.md
+│   ├── 9.5.1 KPI 정의서.md
+│   ├── 9.5.2 최종 차트 유형 선정서.md
+│   ├── 9.5.3.10_차트공통유틸_정리.md
+│   ├── 9.5.3.11_더미데이터_바인딩_적용정리.md
+│   ├── 9.5.3.1_차트테이블_구현_대상_목록.md
+│   ├── 9.5.3.2 공통 UI 규칙 정의.md
+│   ├── 9.5.3.3_KPI카드_구현메모.md
+│   ├── 9.5.3.4_상태표현_구현메모.md
+│   ├── 9.5.3.5_라인차트_구현메모.md
+│   ├── 9.5.3.6_바차트_구현메모.md
+│   ├── 9.5.3.7_도넛차트_구현메모.md
+│   ├── 9.5.3.8_로그리스트_구현메모.md
+│   ├── 9.5.3.9_상세테이블_구현메모.md
+│   └── db_inventory
+│       ├── 20260314_150341_all_tables.txt
+│       ├── 20260314_150341_columns.tsv
+│       ├── 20260314_150341_constraints.tsv
+│       ├── 20260314_150341_databases.txt
+│       ├── 20260314_150341_db_inventory_report.md
+│       ├── 20260314_150341_sample_defect_logs.txt
+│       ├── 20260314_150341_sample_equipment.txt
+│       ├── 20260314_150341_sample_lines.txt
+│       ├── 20260314_150341_sample_ml_predictions.txt
+│       ├── 20260314_150341_sample_notifications.txt
+│       ├── 20260314_150341_sample_product_models.txt
+│       ├── 20260314_150341_sample_production_logs.txt
+│       ├── 20260314_150341_schemas.txt
+│       ├── 20260314_150341_table_list.tsv
+│       └── 20260314_150341_table_row_counts.tsv
+├── export_db_inventory.sh
+├── extract_for_claude_kpi_card.py
+├── extracted_txt
+│   ├── 01_kpi_card_component_files.txt
+│   └── for_claude_kpi_card.txt
+├── folder_structure_with_files.txt
+├── for_claude_binding_check_code_numbered.txt
+├── make_codex_pack.sh
+├── nginx
+│   ├── AI Team proj_Architecture and Flow_2025.02.26 (1).pptx
+│   ├── Dockerfile
+│   ├── certs
+│   │   └── openssl.cnf
+│   ├── conf.d
+│   │   └── default.conf
+│   └── html
+│       ├── auto.html
+│       ├── configuration.html
+│       ├── css
+│       │   ├── style.css
+│       │   ├── ui.css
+│       │   └── wed_dashboard
+│       │       ├── dashboard_status.css
+│       │       └── dashboard_style.css
+│       ├── index.html
+│       ├── iot.html
+│       ├── js
+│       │   ├── dashboard.js
+│       │   ├── login.js
+│       │   ├── ui.js
+│       │   └── wed_dashboard
+│       │       ├── dashboard_api.js
+│       │       ├── dashboard_app.js
+│       │       └── dashboard_charts.js
+│       ├── login.html
+│       ├── manual.html
+│       ├── model.html
+│       ├── source
+│       ├── ui.html
+│       └── web_dashboard.html
+├── portlist.orugu
+├── redis
+│   ├── Dockerfile
+│   ├── conf.d
+│   │   └── limits.conf
+│   └── redis.conf
+├── review_txt
+│   ├── chart_data_requirements_support_bundle.txt
+│   ├── dashboard_related_code_bundle.txt
+│   ├── final_chart_selection_support_bundle.txt
+│   ├── final_chart_type_selection_support_bundle.txt
+│   ├── layout_draft_support_bundle.txt
+│   └── phase1_phase2_scope_support_bundle.txt
+└── server_api
+    ├── .env.example
+    ├── .pytest_cache
+    │   ├── .gitignore
+    │   ├── CACHEDIR.TAG
+    │   ├── README.md
+    │   └── v
+    │       └── cache
+    │           ├── lastfailed
+    │           ├── nodeids
+    │           └── stepwise
+    ├── Dockerfile
+    ├── README.md
+    ├── pytest.ini
+    ├── requirements.txt
+    └── src
+        ├── __init__.py
+        ├── api
+        │   ├── __init__.py
+        │   └── v1
+        │       ├── __init__.py
+        │       └── router.py
+        ├── lib
+        │   ├── __init__.py
+        │   ├── database.py
+        │   ├── env_loader.py
+        │   └── settings.py
+        ├── main.py
+        └── modules
+            ├── __init__.py
+            ├── auth
+            │   ├── __init__.py
+            │   ├── db
+            │   │   ├── __init__.py
+            │   │   ├── crud.py
+            │   │   ├── model.py
+            │   │   └── schema.py
+            │   ├── jwt.py
+            │   ├── router.py
+            │   ├── service.py
+            │   └── vision
+            │       ├── __init__.py
+            │       └── service.py
+            ├── common
+            │   ├── __init__.py
+            │   ├── audit.py
+            │   └── rbac.py
+            ├── dashboard
+            │   ├── __init__.py
+            │   ├── router.py
+            │   └── service.py
+            ├── db
+            │   ├── __init__.py
+            │   ├── items
+            │   │   ├── __init__.py
+            │   │   ├── db
+            │   │   │   ├── __init__.py
+            │   │   │   ├── crud.py
+            │   │   │   ├── model.py
+            │   │   │   └── schema.py
+            │   │   └── router.py
+            │   └── users
+            │       ├── __init__.py
+            │       ├── db
+            │       │   ├── __init__.py
+            │       │   └── model.py
+            │       └── seed.py
+            ├── llm
+            │   ├── __init__.py
+            │   ├── lib
+            │   │   └── llm_question_lib.py
+            │   ├── llm_chat_api.py
+            │   ├── llm_media_api.py
+            │   ├── llm_question.py
+            │   ├── llm_result_api.py
+            │   ├── llm_simple.py
+            │   ├── router.py
+            │   ├── sample
+            │   │   ├── .env
+            │   │   ├── .vscode
+            │   │   │   └── settings.json
+            │   │   ├── agent.py
+            │   │   ├── faiss_index
+            │   │   │   ├── index.faiss
+            │   │   │   └── index.pkl
+            │   │   ├── index.faiss
+            │   │   ├── index.html
+            │   │   ├── index.pkl
+            │   │   ├── knowledge_base
+            │   │   │   ├── pcb defect 원인 조치.pdf
+            │   │   │   └── 새 텍스트 문서.txt
+            │   │   ├── main.py
+            │   │   ├── requirements.txt
+            │   │   └── templates
+            │   │       └── index.html
+            │   └── services
+            │       ├── __init__.py
+            │       ├── agent_service.py
+            │       ├── knowledge_service.py
+            │       └── openai_service.py
+            ├── optimization
+            │   ├── __init__.py
+            │   ├── db
+            │   │   ├── __init__.py
+            │   │   └── schema.py
+            │   ├── router.py
+            │   └── service.py
+            ├── rag
+            │   ├── __init__.py
+            │   ├── db
+            │   │   ├── __init__.py
+            │   │   ├── crud.py
+            │   │   ├── model.py
+            │   │   └── schema.py
+            │   ├── router.py
+            │   └── service.py
+            ├── report
+            │   ├── __init__.py
+            │   ├── db
+            │   │   ├── __init__.py
+            │   │   ├── crud.py
+            │   │   ├── model.py
+            │   │   └── schema.py
+            │   ├── report.py
+            │   ├── router.py
+            │   └── service.py
+            ├── vision
+            │   ├── __init__.py
+            │   ├── db
+            │   │   ├── __init__.py
+            │   │   ├── crud.py
+            │   │   ├── model.py
+            │   │   └── schema.py
+            │   ├── model
+            │   ├── router.py
+            │   └── service.py
+            └── voice_interaction
+                ├── __init__.py
+                ├── db
+                │   ├── __init__.py
+                │   └── schema.py
+                ├── router.py
+                └── service.py
+
+57 directories, 185 files

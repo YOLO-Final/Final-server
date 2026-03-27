@@ -1,0 +1,4 @@
+ noti_id | line_id | target_role | level | message | triggered_at | expires_at | is_dismissed 
+---------+---------+-------------+-------+---------+--------------+------------+--------------
+(0 rows)
+

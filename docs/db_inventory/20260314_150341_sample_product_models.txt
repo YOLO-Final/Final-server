@@ -1,0 +1,4 @@
+ model_name | alert_threshold | danger_threshold | unit | model_id 
+------------+-----------------+------------------+------+----------
+(0 rows)
+

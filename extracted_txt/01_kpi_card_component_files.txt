@@ -1,0 +1,2512 @@
+====================================================================================================
+FILE: nginx/html/web_dashboard.html
+====================================================================================================
+
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>PCB Factory Dashboard</title>
+  <meta name="description" content="스마트 팩토리 PCB 불량 검출 실시간 대시보드" />
+
+  <!-- 구글 폰트: DM Mono(데이터), DM Sans(레이블), Orbitron(홍보) -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;700&family=DM+Sans:wght@400;600;800&family=Orbitron:wght@700;900&display=swap" rel="stylesheet" />
+
+  <!-- Chart.js CDN — 바차트·라인차트·파이차트 렌더링 -->
+  <link rel="stylesheet" href="css/wed_dashboard/dashboard_style.css">
+</head>
+<body>
+
+  <!-- ── 탭 네비게이션 바 (상단 sticky) ── -->
+  <nav id="tab-bar">
+    <div id="brand">PCB FACTORY</div>
+
+    <!-- 탭 버튼: data-tab 속성으로 화면 구분 -->
+    <button class="tab-btn" data-tab="worker"  id="tab-worker">
+      <span class="tab-emoji">👷</span>
+      <span class="tab-label">작업자</span>
+    </button>
+    <button class="tab-btn" data-tab="qa"      id="tab-qa">
+      <span class="tab-emoji">🔬</span>
+      <span class="tab-label">품질관리자</span>
+    </button>
+    <button class="tab-btn active" data-tab="manager" id="tab-manager">
+      <span class="tab-emoji">📊</span>
+      <span class="tab-label">관리자</span>
+    </button>
+    <button class="tab-btn" data-tab="promo"   id="tab-promo">
+      <span class="tab-emoji">📺</span>
+      <span class="tab-label">홍보</span>
+    </button>
+
+    <!-- LIVE 인디케이터 -->
+    <div id="live-indicator">
+      <div id="live-dot"></div>
+      <span id="live-text">LIVE</span>
+    </div>
+  </nav>
+
+  <!-- ── 콘텐츠 영역: JS가 각 화면을 여기에 렌더링 ── -->
+  <main id="content">
+    <!-- 로딩 스피너 (API 응답 전까지 표시) -->
+    <div id="loading">
+      <div class="spinner"></div>
+      <p>데이터 로딩 중...</p>
+    </div>
+  </main>
+
+  <!-- Chart.js (번들) -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.2/dist/chart.umd.min.js"></script>
+
+  <!-- 앱 모듈 로드 순서 중요: api → charts → app -->
+  <script src="js/wed_dashboard/dashboard_api.js"></script>
+  <script src="js/wed_dashboard/dashboard_charts.js"></script>
+  <script src="js/wed_dashboard/dashboard_app.js"></script>
+</body>
+</html>
+
+
+====================================================================================================
+FILE: nginx/html/js/wed_dashboard/dashboard_api.js
+====================================================================================================
+
+const MOCK_LINES = [
+  { id: "A", produced: 4200, plan: 5000, defect_rate: 2.1, status: "RUN", worker: "김철수" },
+  { id: "B", produced: 3950, plan: 5000, defect_rate: 3.8, status: "RUN", worker: "이영희" },
+  { id: "C", produced: 2870, plan: 5000, defect_rate: 4.5, status: "DOWN", worker: "박민준" },
+  { id: "D", produced: 2180, plan: 5000, defect_rate: 2.7, status: "IDLE", worker: "최수진" },
+];
+
+const MOCK_DEFECTS = [
+  { class_name: "short", count: 260, risk: 0.82, color: "#f87171" },
+  { class_name: "open", count: 120, risk: 0.65, color: "#fb923c" },
+  { class_name: "spur", count: 100, risk: 0.44, color: "#fbbf24" },
+  { class_name: "mousebite", count: 70, risk: 0.38, color: "#a3e635" },
+  { class_name: "pin_hole", count: 40, risk: 0.29, color: "#34d399" },
+  { class_name: "spurious_copper", count: 50, risk: 0.22, color: "#22d3ee" },
+];
+
+const MOCK_HOURLY = [
+  { time: "08:00", produced: 1200, defect_rate: 2.1, predicted_defect: null },
+  { time: "09:00", produced: 1380, defect_rate: 2.4, predicted_defect: null },
+  { time: "10:00", produced: 1450, defect_rate: 1.9, predicted_defect: null },
+  { time: "11:00", produced: 1310, defect_rate: 3.2, predicted_defect: null },
+  { time: "12:00", produced: 890, defect_rate: 2.8, predicted_defect: null },
+  { time: "13:00", produced: 1420, defect_rate: 2.5, predicted_defect: null },
+  { time: "14:00", produced: 1550, defect_rate: 2.2, predicted_defect: null },
+  { time: "15:00", produced: 1200, defect_rate: null, predicted_defect: 2.8 },
+  { time: "16:00", produced: 1100, defect_rate: null, predicted_defect: 3.1 },
+  { time: "17:00", produced: 1000, defect_rate: null, predicted_defect: 3.0 },
+];
+
+const MOCK_NG_LIST = [
+  { time: "14:59", board_id: "B-0021", cls: "short", conf: 0.97 },
+  { time: "14:58", board_id: "B-0019", cls: "open", conf: 0.91 },
+  { time: "14:57", board_id: "B-0018", cls: "short", conf: 0.94 },
+  { time: "14:56", board_id: "C-0033", cls: "spur", conf: 0.85 },
+  { time: "14:55", board_id: "A-0044", cls: "mousebite", conf: 0.88 },
+  { time: "14:54", board_id: "B-0017", cls: "short", conf: 0.96 },
+  { time: "14:53", board_id: "A-0042", cls: "pin_hole", conf: 0.79 },
+];
+
+const MOCK_SUMMARY = {
+  total_produced: 13200,
+  total_plan: 20000,
+  achievement_rate: 66.0,
+  total_defects: 640,
+  defect_rate: 2.8,
+  predicted_defect_rate: 3.1,
+  lines_running: 2,
+  lines_down: 1,
+};
+
+async function fetchAll() {
+  return {
+    lines: MOCK_LINES,
+    defects: MOCK_DEFECTS,
+    hourly: MOCK_HOURLY,
+    ngList: MOCK_NG_LIST,
+    summary: MOCK_SUMMARY,
+  };
+}
+
+====================================================================================================
+FILE: nginx/html/js/wed_dashboard/dashboard_app.js
+====================================================================================================
+
+/**
+ * app.js — 메인 애플리케이션 로직
+ * ──────────────────────────────────────────────────────────
+ * 역할:
+ *  1. 앱 시작 시 API에서 전체 데이터 로드
+ *  2. 탭 전환 처리 (worker / qa / manager / promo)
+ *  3. 각 화면 HTML 렌더링 + 차트 초기화
+ *  4. 홍보 스크린: 실시간 시계 + TOP Defect 자동 롤링
+ */
+
+// ── 탭 정의 (id, 레이블, 활성 색상) ─────────────────────
+const TABS = [
+  { id: "worker",  label: "작업자",    color: "#f87171" },
+  { id: "qa",      label: "품질관리자", color: "#fbbf24" },
+  { id: "manager", label: "관리자",    color: "#22d3a0" },
+  { id: "promo",   label: "홍보",      color: "#22d3ee" },
+];
+
+// 현재 활성 탭
+let currentTab = "manager";
+
+// API 데이터 캐시 (탭 전환 시 재요청 없이 재사용)
+let cache = null;
+
+// 홍보 스크린 타이머 ID (언마운트 시 클리어)
+let promoTimers = [];
+
+// ── 상태별 색상 ──────────────────────────────────────────
+const STATUS_COLOR = { RUN: "#22d3a0", IDLE: "#fbbf24", DOWN: "#f87171" };
+const STATUS_BG    = { RUN: "#022c22", IDLE: "#2c1d00", DOWN: "#2d0000" };
+
+/** defects 배열에서 class_name으로 색상 조회 */
+function defectColor(clsName, defects) {
+  return defects.find(d => d.class_name === clsName)?.color ?? "#6b7fa3";
+}
+
+// ── 유틸: HTML 이스케이프 (XSS 방지) ────────────────────
+function esc(str) {
+  return String(str)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
+// ── 유틸: 숫자 포맷 ─────────────────────────────────────
+const fmt  = (n) => Number(n).toLocaleString("ko-KR");
+const pct  = (n, dec = 1) => Number(n).toFixed(dec) + "%";
+
+// ════════════════════════════════════════════════════════
+// 🖼️ HTML 렌더러
+// ════════════════════════════════════════════════════════
+
+/** KPI 카드 HTML 생성 (재사용 가능) */
+function kpiCardHTML({ label, value, sub = "", accent }) {
+  return `
+    <div class="kpi-card" style="border:1px solid ${accent}33; box-shadow:0 0 20px ${accent}14;">
+      <div class="kpi-label">${esc(label)}</div>
+      <div class="kpi-value" style="color:${accent}">${esc(value)}</div>
+      ${sub ? `<div class="kpi-sub">${esc(sub)}</div>` : ""}
+    </div>`;
+}
+
+// ── SCREEN 1: 작업자 ─────────────────────────────────────
+function renderWorker({ defects, ngList, summary }) {
+  const maxCount = Math.max(...defects.map(d => d.count));
+
+  // KPI 카드 데이터
+  const kpis = [
+    { label: "목표 생산량",  value: "12,000 pcs",      accent: "#4a9eff", sub: "오늘 LINE B" },
+    { label: "현재 생산량",  value: "7,840 pcs",        accent: "#22d3a0", sub: "달성률 65.3%" },
+    { label: "현재 불량률",  value: "2.8%",             accent: "#fbbf24", sub: "예측 3.4%" },
+    { label: "최근 10분 NG", value: "26건",             accent: "#f87171", sub: "주요: short" },
+  ];
+
+  // Defect 바 리스트 HTML
+  const defectBars = defects.map(d => `
+    <div class="defect-bar-row">
+      <div class="defect-bar-label">${esc(d.class_name)}</div>
+      <div class="defect-bar-track">
+        <div class="defect-bar-fill" style="width:${(d.count / maxCount * 100).toFixed(1)}%; background:${d.color};"></div>
+      </div>
+      <div class="defect-bar-count" style="color:${d.color}">${d.count}</div>
+    </div>`).join("");
+
+  // NG 로그 HTML (최대 7개)
+  const ngRows = ngList.slice(0, 7).map(r => {
+    const clsColor = defectColor(r.cls, defects);
+    const lineId   = r.board_id.split("-")[0];
+    const confPct  = Math.floor(r.conf * 100);
+    return `
+      <div class="ng-row">
+        <span class="ng-time">${esc(r.time)}</span>
+        <span class="ng-line">LINE ${esc(lineId)}</span>
+        <span class="ng-badge" style="background:${clsColor}22; color:${clsColor}; border:1px solid ${clsColor}44">${esc(r.cls)}</span>
+        <span class="ng-conf">${confPct}%</span>
+        <span class="ng-tag">NG</span>
+      </div>`;
+  }).join("");
+
+  return `
+    <div class="screen">
+      <!-- 경고 배너 -->
+      <div class="alert-banner">
+        <span class="alert-icon">⚠</span>
+        <div style="flex:1">
+          <div class="alert-title">LINE B — short 불량 급증 감지</div>
+          <div class="alert-msg">최근 10분 26건 발생 · 즉시 점검 요망</div>
+        </div>
+        <span class="alert-time">14:59:21</span>
+      </div>
+
+      <!-- KPI 카드 2열(모바일)/4열(태블릿+) -->
+      <div class="grid grid-4" style="gap:10px">
+        ${kpis.map(kpiCardHTML).join("")}
+      </div>
+
+      <!-- 하단 2단 -->
+      <div class="grid grid-chart">
+        <!-- Defect 바 차트 -->
+        <div class="card">
+          <div class="section-title">Defect Class 실시간</div>
+          ${defectBars}
+        </div>
+
+        <!-- NG 로그 -->
+        <div class="card">
+          <div class="section-title">실시간 NG 로그</div>
+          ${ngRows}
+        </div>
+      </div>
+    </div>`;
+}
+
+// ── SCREEN 2: 품질관리자 ─────────────────────────────────
+function renderQA({ defects, hourly, ngList }) {
+  const total = defects.reduce((a, d) => a + d.count, 0);
+
+  const kpis = [
+    { label: "검사 수량",   value: "8,420",   accent: "#60a5fa" },
+    { label: "양품 수량",   value: "8,065",   accent: "#34d399" },
+    { label: "총 불량",     value: "640",     accent: "#f87171" },
+    { label: "불량률",      value: "7.60%",   accent: "#fbbf24" },
+    { label: "예측 불량률", value: "8.1%",    accent: "#fb923c" },
+    { label: "재검 필요",   value: "48",      accent: "#c084fc" },
+  ];
+
+  // 도넛 차트 범례 HTML
+  const pieLegend = defects.map(d => `
+    <div style="display:flex; align-items:center; gap:6px; margin-bottom:7px">
+      <div style="width:8px; height:8px; border-radius:50%; background:${d.color}; flex-shrink:0"></div>
+      <span style="font-size:11px; color:#6b7fa3; flex:1">${esc(d.class_name)}</span>
+      <span style="font-size:12px; color:${d.color}; font-family:'DM Mono',monospace; font-weight:700">
+        ${(d.count / total * 100).toFixed(1)}%
+      </span>
+    </div>`).join("");
+
+  // NG 테이블 행 HTML
+  const tableRows = ngList.map(r => {
+    const clsColor = defectColor(r.cls, defects);
+    return `
+      <tr>
+        <td class="td-time">${esc(r.time)}</td>
+        <td class="td-id">${esc(r.board_id)}</td>
+        <td>
+          <span style="background:${clsColor}22; color:${clsColor}; border:1px solid ${clsColor}44; border-radius:4px; padding:2px 8px; font-size:11px; font-family:'DM Mono',monospace">
+            ${esc(r.cls)}
+          </span>
+        </td>
+        <td class="td-conf">${Math.floor(r.conf * 100)}%</td>
+        <td><span style="color:#f87171; font-size:11px; font-weight:700">NG</span></td>
+      </tr>`;
+  }).join("");
+
+  return `
+    <div class="screen">
+      <!-- KPI 2/3/6열 -->
+      <div class="grid grid-6" style="gap:10px">
+        ${kpis.map(kpiCardHTML).join("")}
+      </div>
+
+      <!-- 차트 2단 -->
+      <div class="grid grid-chart">
+        <!-- 불량률 라인 차트 -->
+        <div class="card">
+          <div class="section-title">시간대별 불량률 추이</div>
+          <div class="chart-wrap" style="height:210px">
+            <canvas id="qaLineChart"></canvas>
+          </div>
+        </div>
+
+        <!-- 도넛 파이 + 범례 -->
+        <div class="card">
+          <div class="section-title">Defect Class 구성</div>
+          <div style="display:flex; gap:10px; align-items:center">
+            <div style="width:150px; height:150px; flex-shrink:0">
+              <canvas id="qaPieChart"></canvas>
+            </div>
+            <div style="flex:1">${pieLegend}</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- NG 테이블 (모바일: 가로 스크롤) -->
+      <div class="card">
+        <div class="section-title">NG 검출 리스트</div>
+        <div style="overflow-x:auto; -webkit-overflow-scrolling:touch">
+          <table class="ng-table" style="min-width:420px">
+            <thead>
+              <tr>
+                ${["시간","Board ID","Class","Conf.","결과"].map(h => `<th>${h}</th>`).join("")}
+              </tr>
+            </thead>
+            <tbody>${tableRows}</tbody>
+          </table>
+        </div>
+      </div>
+    </div>`;
+}
+
+// ── SCREEN 3: 관리자 ─────────────────────────────────────
+function renderManager({ lines, defects, hourly, summary }) {
+  const { total_produced, total_plan, achievement_rate } = summary;
+
+  const kpis = [
+    { label: "계획 생산량", value: fmt(total_plan) + " pcs",      accent: "#60a5fa", sub: "오늘 전체" },
+    { label: "실제 생산량", value: fmt(total_produced) + " pcs",  accent: "#22d3a0", sub: `달성 ${achievement_rate}%` },
+    { label: "예상 종료량", value: "19,100 pcs",                  accent: "#a78bfa", sub: "종료 시 예측" },
+    { label: "현재 불량률", value: "2.8%",                        accent: "#fbbf24", sub: "전일 -0.9%" },
+    { label: "예측 불량률", value: "3.1%",                        accent: "#f87171", sub: "종료 시 예측" },
+  ];
+
+  // 라인별 현황 카드 HTML
+  const lineCards = lines.map(l => {
+    const clr  = STATUS_COLOR[l.status];
+    const bg   = STATUS_BG[l.status];
+    const barColor = l.status === "DOWN" ? "#f87171" : l.status === "IDLE" ? "#fbbf24" : "#22d3a0";
+    const barPct   = ((l.produced / l.plan) * 100).toFixed(1);
+    return `
+      <div class="line-card">
+        <div style="display:flex; align-items:center; gap:12px">
+          <div class="line-badge" style="background:${bg}; border:1px solid ${clr}55; color:${clr}">L${esc(l.id)}</div>
+          <div class="line-info">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:5px">
+              <span class="line-produced">${fmt(l.produced)} <small>pcs</small></span>
+              <span class="line-status-badge" style="color:${clr}; background:${bg}; border:1px solid ${clr}55">${esc(l.status)}</span>
+            </div>
+            <div style="display:flex; align-items:center; gap:8px">
+              <div class="progress-track">
+                <div class="progress-fill" style="width:${barPct}%; background:${barColor}"></div>
+              </div>
+              <span style="font-size:11px; color:#4a5d7a; flex-shrink:0">불량 ${l.defect_rate}%</span>
+            </div>
+          </div>
+        </div>
+      </div>`;
+  }).join("");
+
+  // Defect 리스크 게이지 HTML
+  const gauges = defects.map(d => {
+    const deg = (d.risk * 360).toFixed(0);
+    return `
+      <div class="risk-gauge-wrap" style="border:1px solid ${d.color}2a">
+        <div class="risk-label">${esc(d.class_name)}</div>
+        <div class="risk-donut" style="width:56px;height:56px; background:conic-gradient(${d.color} ${deg}deg, #1e2d40 0)">
+          <div class="risk-inner" style="width:42px;height:42px">
+            <span class="risk-pct" style="color:${d.color}">${(d.risk * 100).toFixed(0)}%</span>
+          </div>
+        </div>
+        <div class="risk-count">${d.count}건</div>
+      </div>`;
+  }).join("");
+
+  return `
+    <div class="screen">
+      <!-- ① KPI 5열 -->
+      <div class="grid grid-5" style="gap:10px">
+        ${kpis.map(kpiCardHTML).join("")}
+      </div>
+
+      <!-- ② 복합 차트 + 라인 현황 -->
+      <div class="grid grid-chart">
+        <div class="card">
+          <div class="section-title">시간대별 생산량 / 불량률</div>
+          <div class="chart-wrap" style="height:230px">
+            <canvas id="managerHourlyChart"></canvas>
+          </div>
+        </div>
+        <div class="card">
+          <div class="section-title">라인별 현황</div>
+          ${lineCards}
+        </div>
+      </div>
+
+      <!-- ③ Defect 리스크 게이지 -->
+      <div class="card">
+        <div class="section-title">다음 2시간 Defect Class 위험도 예측</div>
+        <div class="grid grid-6" style="gap:10px">${gauges}</div>
+        <div style="margin-top:14px; background:#1c0a00; border-radius:8px; padding:10px 14px; border:1px solid #f8717144">
+          <span style="color:#fbbf24; font-size:12px; font-weight:700">⚠ </span>
+          <span style="color:#fca5a5; font-size:12px">short 급증 위험 · LINE B 최근 30분 +42% — 즉각 점검 권고</span>
+        </div>
+      </div>
+    </div>`;
+}
+
+// ── SCREEN 4: 홍보 ───────────────────────────────────────
+function renderPromo({ defects, hourly }) {
+  const kpis = [
+    { label: "오늘 총 생산량",  value: "13,200 pcs",  color: "#22d3ee" },
+    { label: "목표 달성률",    value: "66.0%",        color: "#22d3a0" },
+    { label: "현재 양품률",    value: "97.2%",        color: "#4ade80" },
+    { label: "현재 불량률",    value: "2.8%",         color: "#fbbf24" },
+    { label: "전일 대비 개선", value: "+0.9%",        color: "#34d399" },
+    { label: "AI 검출",       value: "1,842 boards",  color: "#a78bfa" },
+  ];
+
+  const kpiCards = kpis.map(c => `
+    <div class="promo-kpi-card" style="border:1px solid ${c.color}33; box-shadow:0 0 30px ${c.color}0a">
+      <div class="promo-kpi-label">${esc(c.label)}</div>
+      <div class="promo-kpi-value" style="color:${c.color}">${esc(c.value)}</div>
+    </div>`).join("");
+
+  return `
+    <div class="promo-screen">
+      <!-- 헤더 -->
+      <div class="promo-header">
+        <div class="promo-subtitle">Smart Factory PCB</div>
+        <h2 class="promo-title">오늘의 생산 현황</h2>
+        <div class="promo-clock" id="promoClock">00:00:00</div>
+      </div>
+
+      <!-- KPI -->
+      <div class="grid grid-3" style="gap:16px; margin-bottom:20px">
+        ${kpiCards}
+      </div>
+
+      <!-- TOP Defect 롤링 + 생산 추이 -->
+      <div class="grid" style="grid-template-columns:1fr 1fr; gap:16px">
+        <!-- TOP Defect 패널 (JS로 동적 업데이트) -->
+        <div class="top-defect-panel" id="topDefectPanel">
+          <div style="color:#4a5d7a; font-size:10px; letter-spacing:3px; text-transform:uppercase; margin-bottom:14px">TOP Defect (자동 롤링)</div>
+          <div class="top-defect-rank" id="topDefectRank">#1</div>
+          <div class="top-defect-name" id="topDefectName">—</div>
+          <div class="top-defect-count" id="topDefectCount">— 건 발생</div>
+          <div class="top-defect-dots" id="topDefectDots"></div>
+        </div>
+
+        <!-- 생산 추이 차트 -->
+        <div class="promo-chart-panel">
+          <div style="color:#4a5d7a; font-size:10px; letter-spacing:3px; text-transform:uppercase; margin-bottom:12px; text-align:center">시간대별 생산 추이</div>
+          <div class="chart-wrap" style="height:160px">
+            <canvas id="promoLineChart"></canvas>
+          </div>
+        </div>
+      </div>
+    </div>`;
+}
+
+// ════════════════════════════════════════════════════════
+// 🔄 홍보 스크린 인터랙션
+// ════════════════════════════════════════════════════════
+
+/**
+ * 홍보 스크린의 실시간 시계 + TOP Defect 롤링 시작
+ * @param {Array} defects
+ */
+function startPromoTimers(defects) {
+  // 기존 타이머 정리
+  promoTimers.forEach(clearInterval);
+  promoTimers = [];
+
+  // 발생 건수 내림차순 정렬
+  const sorted = [...defects].sort((a, b) => b.count - a.count).slice(0, 3);
+  let idx = 0;
+
+  /** TOP Defect 패널 업데이트 */
+  function updateTopDefect() {
+    const d     = sorted[idx];
+    const panel = document.getElementById("topDefectPanel");
+    const rank  = document.getElementById("topDefectRank");
+    const name  = document.getElementById("topDefectName");
+    const count = document.getElementById("topDefectCount");
+    const dots  = document.getElementById("topDefectDots");
+    if (!panel) return;
+
+    panel.style.borderColor  = d.color + "44";
+    panel.style.boxShadow    = `0 0 40px ${d.color}18`;
+    rank.style.background    = d.color + "18";
+    rank.style.border        = `2px solid ${d.color}66`;
+    rank.textContent         = `#${idx + 1}`;
+    name.style.color         = d.color;
+    name.textContent         = d.class_name.toUpperCase();
+    count.textContent        = `${d.count}건 발생`;
+
+    // 페이지 인디케이터 점 렌더링
+    dots.innerHTML = sorted.map((s, i) =>
+      `<div class="dot ${i === idx ? "active" : ""}" style="--dot-color:${s.color}"></div>`
+    ).join("");
+
+    idx = (idx + 1) % sorted.length;
+  }
+
+  updateTopDefect(); // 즉시 1회 실행
+  promoTimers.push(setInterval(updateTopDefect, 3000)); // 3초마다 전환
+
+  /** 실시간 시계 업데이트 */
+  function updateClock() {
+    const el = document.getElementById("promoClock");
+    if (el) el.textContent = new Date().toLocaleTimeString("ko-KR");
+  }
+
+  updateClock();
+  promoTimers.push(setInterval(updateClock, 1000)); // 1초마다 갱신
+}
+
+// ════════════════════════════════════════════════════════
+// 🏠 탭 전환 & 앱 초기화
+// ════════════════════════════════════════════════════════
+
+/**
+ * 탭을 활성화하고 해당 화면을 렌더링합니다.
+ * @param {string} tabId - "worker" | "qa" | "manager" | "promo"
+ */
+function activateTab(tabId) {
+  // 홍보 스크린 타이머 정리 (다른 탭으로 이동 시)
+  if (currentTab === "promo") {
+    promoTimers.forEach(clearInterval);
+    promoTimers = [];
+  }
+
+  currentTab = tabId;
+
+  // 탭 버튼 활성 스타일 적용
+  document.querySelectorAll(".tab-btn").forEach(btn => {
+    const isActive = btn.dataset.tab === tabId;
+    btn.classList.toggle("active", isActive);
+    if (isActive) {
+      const tabDef = TABS.find(t => t.id === tabId);
+      btn.style.setProperty("--tab-color", tabDef?.color ?? "#22d3a0");
+    }
+  });
+
+  // 캐시 데이터로 화면 렌더링
+  const { lines, defects, hourly, ngList, summary } = cache;
+  const content = document.getElementById("content");
+
+  // 화면별 HTML 렌더링
+  switch (tabId) {
+    case "worker":  content.innerHTML = renderWorker({ defects, ngList, summary });   break;
+    case "qa":      content.innerHTML = renderQA({ defects, hourly, ngList });        break;
+    case "manager": content.innerHTML = renderManager({ lines, defects, hourly, summary }); break;
+    case "promo":   content.innerHTML = renderPromo({ defects, hourly });             break;
+  }
+
+  // 화면별 차트 초기화 (DOM 삽입 후 실행됨)
+  requestAnimationFrame(() => {
+    switch (tabId) {
+      case "worker":
+        // 작업자 화면: 차트 없음 (바는 CSS로 렌더링)
+        break;
+      case "qa":
+        renderDefectRateChart("qaLineChart", hourly);
+        renderDefectPieChart("qaPieChart", defects);
+        break;
+      case "manager":
+        renderHourlyChart("managerHourlyChart", hourly);
+        break;
+      case "promo":
+        renderPromoLineChart("promoLineChart", hourly);
+        startPromoTimers(defects);
+        break;
+    }
+  });
+}
+
+/**
+ * 앱 초기화 — DOM 로드 후 실행
+ * 1. API에서 전체 데이터 로드
+ * 2. 탭 이벤트 리스너 등록
+ * 3. 기본 탭(관리자) 활성화
+ */
+async function initApp() {
+  try {
+    // 모든 API 병렬 호출 (fetchAll: api.js)
+    cache = await fetchAll();
+
+    // 탭 버튼 클릭 이벤트 등록
+    document.querySelectorAll(".tab-btn").forEach(btn => {
+      btn.addEventListener("click", () => activateTab(btn.dataset.tab));
+    });
+
+    // 기본 탭 활성화
+    activateTab("manager");
+
+  } catch (err) {
+    // API 오류 시 에러 메시지 표시
+    document.getElementById("content").innerHTML = `
+      <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; height:60vh; color:#f87171; gap:12px">
+        <div style="font-size:32px">⚠</div>
+        <div>API 연결 실패: ${esc(err.message)}</div>
+        <div style="font-size:12px; color:#4a5d7a">FastAPI 서버가 실행 중인지 확인하세요</div>
+        <code style="font-size:11px; color:#6b7fa3">uvicorn backend.main:app --reload</code>
+      </div>`;
+  }
+}
+
+// DOM 준비 완료 후 앱 초기화 실행
+document.addEventListener("DOMContentLoaded", initApp);
+
+
+====================================================================================================
+FILE: nginx/html/css/wed_dashboard/dashboard_style.css
+====================================================================================================
+
+/*
+ * style.css — PCB Dashboard 전체 스타일
+ * ──────────────────────────────────────────────────────────
+ * 디자인 토큰은 :root CSS 변수로 관리 → 한 곳만 수정하면 전체 반영
+ * 반응형: Mobile(<768) / Tablet(768~1024) / Desktop(>1024)
+ */
+
+/* ── CSS 변수 (디자인 토큰) ─────────────────────────────── */
+:root {
+  --bg-app:    #080e18;
+  --bg-card:   #0c1520;
+  --bg-deep:   #0a111c;
+  --bg-bar:    #1e2d40;
+  --border:    #1a2840;
+  --border-md: #1e2d40;
+
+  --text-label: #4a5d7a;
+  --text-muted: #6b7fa3;
+  --text-body:  #a0b4cc;
+  --text-main:  #e2ecff;
+
+  --blue:   #4a9eff;
+  --cyan:   #22d3ee;
+  --green:  #22d3a0;
+  --yellow: #fbbf24;
+  --red:    #f87171;
+  --orange: #fb923c;
+  --purple: #a78bfa;
+  --lime:   #a3e635;
+
+  --font-mono: 'DM Mono', monospace;
+  --font-sans: 'DM Sans', sans-serif;
+  --font-orb:  'Orbitron', monospace;
+
+  --radius-card:  14px;
+  --radius-inner: 10px;
+}
+
+/* ── 리셋 & 기본 ────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  background: var(--bg-app);
+  color: var(--text-main);
+  font-family: var(--font-sans);
+  min-height: 100vh;
+  -webkit-tap-highlight-color: transparent; /* 모바일 탭 하이라이트 제거 */
+}
+
+::-webkit-scrollbar { width: 4px; height: 4px; }
+::-webkit-scrollbar-track { background: var(--bg-app); }
+::-webkit-scrollbar-thumb { background: var(--border-md); border-radius: 4px; }
+
+/* ── 탭 바 ──────────────────────────────────────────────── */
+#tab-bar {
+  display: flex;
+  align-items: stretch;
+  background: var(--bg-deep);
+  border-bottom: 1px solid var(--border-md);
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  height: 50px;
+}
+
+#brand {
+  display: flex;
+  align-items: center;
+  padding: 0 16px;
+  border-right: 1px solid var(--border-md);
+  margin-right: 4px;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-label);
+  letter-spacing: 1px;
+  white-space: nowrap;
+}
+
+/* 탭 버튼 공통 */
+.tab-btn {
+  flex: none;
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0 18px;
+  min-width: 100px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-label);
+  border-bottom: 2px solid transparent;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  transition: color 0.2s, border-color 0.2s;
+}
+
+/* 활성 탭 색상은 JS에서 --tab-color 변수를 동적으로 주입 */
+.tab-btn.active { color: var(--tab-color, var(--green)); border-bottom-color: var(--tab-color, var(--green)); }
+
+.tab-emoji { font-size: 16px; }
+.tab-label { font-size: 11px; }
+
+/* LIVE 인디케이터 */
+#live-indicator {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0 14px;
+}
+#live-dot {
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: var(--green);
+  box-shadow: 0 0 6px var(--green);
+  animation: pulse 2s infinite;
+}
+#live-text { color: var(--green); font-size: 11px; letter-spacing: 1px; }
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.4; }
+}
+
+/* ── 콘텐츠 영역 ────────────────────────────────────────── */
+#content { overflow-x: hidden; }
+
+/* ── 로딩 ────────────────────────────────────────────────── */
+#loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 60vh;
+  color: var(--text-label);
+  gap: 16px;
+}
+.spinner {
+  width: 40px; height: 40px;
+  border: 3px solid var(--border-md);
+  border-top-color: var(--green);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ── 공통 레이아웃 ──────────────────────────────────────── */
+.screen { padding: 20px; display: flex; flex-direction: column; gap: 14px; }
+
+/* 그리드 헬퍼 */
+.grid { display: grid; gap: 10px; }
+.grid-2 { grid-template-columns: repeat(2, 1fr); }
+.grid-3 { grid-template-columns: repeat(3, 1fr); }
+.grid-4 { grid-template-columns: repeat(4, 1fr); }
+.grid-5 { grid-template-columns: repeat(5, 1fr); }
+.grid-6 { grid-template-columns: repeat(6, 1fr); }
+.grid-chart { grid-template-columns: 1.4fr 1fr; gap: 14px; }
+
+/* ── 카드 ──────────────────────────────────────────────── */
+.card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  padding: 16px;
+}
+
+/* 섹션 제목 (소형 대문자) */
+.section-title {
+  color: var(--text-label);
+  font-size: 10px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  margin-bottom: 14px;
+  font-family: var(--font-sans);
+}
+
+/* ── KPI 카드 ──────────────────────────────────────────── */
+.kpi-card {
+  background: linear-gradient(135deg, #0f1923 60%, #131f2e);
+  border-radius: var(--radius-card);
+  padding: 16px 20px;
+  min-height: 90px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+}
+.kpi-label {
+  font-size: 10px;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  color: var(--text-label);
+  font-family: var(--font-sans);
+}
+.kpi-value {
+  font-size: 26px;
+  font-weight: 700;
+  font-family: var(--font-mono);
+  line-height: 1;
+  margin: 6px 0;
+}
+.kpi-sub { font-size: 11px; color: var(--text-label); }
+
+/* ── 경고 배너 ──────────────────────────────────────────── */
+.alert-banner {
+  background: linear-gradient(90deg, #2d0a00, #3d1500);
+  border: 1px solid var(--red);
+  border-radius: var(--radius-inner);
+  padding: 10px 16px;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  box-shadow: 0 0 20px #f8717144;
+}
+.alert-icon { font-size: 20px; flex-shrink: 0; }
+.alert-title { color: #fca5a5; font-size: 13px; font-weight: 700; }
+.alert-msg   { color: var(--red); font-size: 12px; margin-top: 2px; }
+.alert-time  { color: var(--red); font-size: 11px; flex-shrink: 0; margin-left: auto; }
+
+/* ── Defect 바 리스트 ───────────────────────────────────── */
+.defect-bar-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 9px;
+}
+.defect-bar-label { width: 105px; font-size: 11px; color: var(--text-muted); text-align: right; flex-shrink: 0; }
+.defect-bar-track { flex: 1; height: 18px; background: var(--bg-bar); border-radius: 4px; overflow: hidden; }
+.defect-bar-fill  { height: 100%; border-radius: 4px; transition: width 1.2s ease; }
+.defect-bar-count { width: 28px; font-size: 13px; font-weight: 700; text-align: right; flex-shrink: 0; }
+
+/* ── NG 로그 리스트 ─────────────────────────────────────── */
+.ng-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 0;
+  border-bottom: 1px solid var(--border);
+}
+.ng-time  { font-size: 11px; color: var(--text-label); font-family: var(--font-mono); flex-shrink: 0; }
+.ng-line  { font-size: 11px; color: #506070; flex-shrink: 0; }
+.ng-badge {
+  border-radius: 5px;
+  padding: 1px 8px;
+  font-size: 11px;
+  font-family: var(--font-mono);
+  flex: 1;
+}
+.ng-conf  { font-size: 11px; color: var(--text-label); flex-shrink: 0; }
+.ng-tag   { font-size: 11px; font-weight: 700; color: var(--red); flex-shrink: 0; }
+
+/* ── 라인 현황 카드 ─────────────────────────────────────── */
+.line-card {
+  background: var(--bg-deep);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-inner);
+  padding: 11px 13px;
+  margin-bottom: 10px;
+}
+.line-badge {
+  width: 40px; height: 40px;
+  border-radius: 8px;
+  display: flex; align-items: center; justify-content: center;
+  font-weight: 800; font-size: 13px;
+  font-family: var(--font-mono);
+  flex-shrink: 0;
+}
+.line-info { flex: 1; min-width: 0; }
+.line-produced { font-size: 14px; font-weight: 700; font-family: var(--font-mono); color: #c0d0e8; }
+.line-produced small { font-size: 11px; color: var(--text-label); }
+.line-status-badge { border-radius: 5px; padding: 2px 9px; font-size: 11px; font-weight: 700; }
+.progress-track { flex: 1; height: 5px; background: var(--bg-bar); border-radius: 4px; overflow: hidden; }
+.progress-fill  { height: 100%; border-radius: 4px; transition: width 1s ease; }
+
+/* ── 리스크 게이지 ──────────────────────────────────────── */
+.risk-gauge-wrap {
+  background: var(--bg-deep);
+  border-radius: 12px;
+  padding: 14px;
+  text-align: center;
+}
+.risk-label { color: var(--text-label); font-size: 10px; margin-bottom: 10px; font-family: var(--font-sans); }
+.risk-donut {
+  border-radius: 50%;
+  margin: 0 auto 10px;
+  display: flex; align-items: center; justify-content: center;
+}
+.risk-inner {
+  border-radius: 50%;
+  background: var(--bg-deep);
+  display: flex; align-items: center; justify-content: center;
+}
+.risk-pct { font-size: 13px; font-weight: 700; font-family: var(--font-mono); }
+.risk-count { font-size: 12px; color: var(--text-muted); }
+
+/* ── NG 테이블 ──────────────────────────────────────────── */
+.ng-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.ng-table th {
+  color: var(--text-label);
+  text-align: left;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border-md);
+  font-weight: 600;
+  font-size: 11px;
+}
+.ng-table td { padding: 8px 10px; border-bottom: 1px solid #1a2535; }
+.ng-table .td-time { color: var(--text-label); font-family: var(--font-mono); }
+.ng-table .td-id   { color: var(--text-body);  font-family: var(--font-mono); }
+.ng-table .td-conf { color: #c0d0e8; font-family: var(--font-mono); }
+
+/* ── 차트 컨테이너 ──────────────────────────────────────── */
+.chart-wrap { position: relative; width: 100%; }
+
+/* ── 홍보 스크린 전용 ───────────────────────────────────── */
+.promo-screen {
+  min-height: calc(100vh - 50px);
+  padding: 28px;
+  background: radial-gradient(ellipse at 20% 20%, #001a2c 0%, #000d18 60%, #0a0014 100%);
+}
+.promo-header { text-align: center; margin-bottom: 30px; }
+.promo-subtitle { color: var(--cyan); font-size: 10px; letter-spacing: 4px; text-transform: uppercase; margin-bottom: 6px; }
+.promo-title { font-size: 26px; font-weight: 900; color: var(--text-main); letter-spacing: 1px; font-family: var(--font-orb); }
+.promo-clock { color: var(--cyan); font-size: 28px; font-weight: 700; margin-top: 6px; font-family: var(--font-orb); }
+
+.promo-kpi-card {
+  background: rgba(255,255,255,0.04);
+  border-radius: var(--radius-card);
+  padding: 22px 20px;
+  text-align: center;
+}
+.promo-kpi-label { color: var(--text-label); font-size: 9px; letter-spacing: 2px; text-transform: uppercase; margin-bottom: 8px; }
+.promo-kpi-value { font-weight: 900; font-family: var(--font-orb); line-height: 1; font-size: 36px; }
+
+.top-defect-panel {
+  background: rgba(255,255,255,0.03);
+  border-radius: 16px;
+  padding: 24px;
+  text-align: center;
+  transition: border-color 0.5s, box-shadow 0.5s;
+}
+.top-defect-rank {
+  display: inline-block;
+  border-radius: 10px;
+  padding: 4px 16px;
+  margin-bottom: 10px;
+  color: var(--text-label);
+  font-size: 12px;
+}
+.top-defect-name {
+  font-size: 40px;
+  font-weight: 900;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  font-family: var(--font-orb);
+}
+.top-defect-count { color: var(--text-muted); font-size: 15px; margin-top: 8px; }
+.top-defect-dots  { display: flex; justify-content: center; gap: 8px; margin-top: 14px; }
+.dot {
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  background: var(--bg-bar);
+  transition: background 0.3s;
+}
+.dot.active { background: var(--dot-color); }
+
+.promo-chart-panel {
+  background: rgba(255,255,255,0.03);
+  border: 1px solid var(--border-md);
+  border-radius: 16px;
+  padding: 24px;
+}
+
+/* ── 반응형 ─────────────────────────────────────────────── */
+@media (max-width: 767px) {
+  #brand { display: none; }
+
+  .tab-btn {
+    flex: 1;
+    padding: 0 4px;
+    min-width: 0;
+    font-size: 11px;
+  }
+  .tab-emoji { font-size: 20px; }
+  .tab-label { font-size: 9px; }
+  #live-text { display: none; }
+
+  .screen { padding: 14px; }
+
+  .grid-4, .grid-5, .grid-6 { grid-template-columns: repeat(2, 1fr); }
+  .grid-3 { grid-template-columns: repeat(2, 1fr); }
+  .grid-chart { grid-template-columns: 1fr; }
+
+  .kpi-value { font-size: 28px; }
+  .kpi-card  { min-height: 100px; padding: 18px 16px; }
+
+  .defect-bar-label { width: 90px; }
+
+  .risk-donut  { width: 52px !important; height: 52px !important; }
+  .risk-inner  { width: 38px !important; height: 38px !important; }
+  .risk-pct    { font-size: 12px !important; }
+
+  .promo-screen { padding: 16px; }
+  .promo-title  { font-size: 20px; }
+  .promo-clock  { font-size: 22px; }
+  .promo-kpi-value { font-size: 28px; }
+  .promo-kpi-card  { padding: 16px 14px; }
+  .top-defect-name { font-size: 32px; }
+  .top-defect-panel, .promo-chart-panel { padding: 18px; }
+
+  .line-badge { width: 44px !important; height: 44px !important; }
+}
+
+@media (min-width: 768px) and (max-width: 1023px) {
+  .grid-5 { grid-template-columns: repeat(3, 1fr); }
+  .grid-6 { grid-template-columns: repeat(3, 1fr); }
+}
+
+
+====================================================================================================
+FILE: server_api/src/modules/dashboard/router.py
+====================================================================================================
+
+from fastapi import APIRouter
+
+from src.modules.dashboard.service import dashboard_status_placeholder
+
+router = APIRouter(prefix="/dashboard", tags=["dashboard"])
+
+
+@router.get("/status")
+def dashboard_status():
+    return dashboard_status_placeholder()
+
+
+====================================================================================================
+FILE: server_api/src/modules/dashboard/service.py
+====================================================================================================
+
+def dashboard_status_placeholder() -> dict:
+    return {
+        "module": "dashboard",
+        "message": "Dashboard skeleton is ready. Wire feature endpoints here.",
+    }
+
+
+====================================================================================================
+FILE: server_api/src/main.py
+====================================================================================================
+
+from fastapi import FastAPI
+from sqlalchemy.orm import Session
+
+from src.api.v1.router import api_v1_router
+from src.lib.database import Base, engine
+from src.lib.settings import settings
+from src.modules.auth.db.model import FaceEmbeddingTable, VectorTable  # noqa: F401
+from src.modules.db.items.db.model import Item  # noqa: F401
+from src.modules.db.users.db.model import UserTable  # noqa: F401
+from src.modules.db.users.seed import seed_test_admin_user
+from dotenv import load_dotenv
+load_dotenv()
+
+app = FastAPI(title=settings.app_name, version=settings.app_version)
+
+
+@app.on_event("startup")
+def on_startup() -> None:
+    # 등록된 모델 메타데이터 기준으로 테이블을 자동 생성합니다.
+    Base.metadata.create_all(bind=engine)
+
+    with Session(engine) as db:
+        seed_test_admin_user(db)
+
+
+@app.get("/health")
+def health_check():
+    return {"status": "ok"}
+
+
+app.include_router(api_v1_router, prefix=settings.api_v1_prefix)
+
+
+====================================================================================================
+FILE: server_api/src/api/v1/router.py
+====================================================================================================
+
+from fastapi import APIRouter
+
+from src.modules.auth.router import router as auth_router
+#from src.modules.chatlog.router import router as chatlog_router
+from src.modules.dashboard.router import router as dashboard_router
+from src.modules.db.items.router import router as items_router
+from src.modules.llm.router import router as llm_router
+from src.modules.optimization.router import router as optimization_router
+from src.modules.rag.router import router as rag_router
+from src.modules.report.router import router as report_router
+from src.modules.vision.router import router as vision_router
+from src.modules.voice_interaction.router import router as voice_router
+
+api_v1_router = APIRouter()
+api_v1_router.include_router(auth_router)
+#api_v1_router.include_router(chatlog_router)
+api_v1_router.include_router(dashboard_router)
+api_v1_router.include_router(llm_router)
+api_v1_router.include_router(items_router)
+api_v1_router.include_router(voice_router)
+api_v1_router.include_router(optimization_router)
+api_v1_router.include_router(vision_router)
+api_v1_router.include_router(rag_router)
+api_v1_router.include_router(report_router)
+
+
+====================================================================================================
+FILE: nginx/html/css/ui.css
+====================================================================================================
+
+:root {
+  --bg-top: #f6f2e9;
+  --bg-bottom: #d8e3f4;
+  --ink: #172030;
+  --muted: #586174;
+  --card: rgba(255, 255, 255, 0.78);
+  --line: rgba(23, 32, 48, 0.15);
+  --accent: #cf4f2d;
+  --accent-dark: #9c3317;
+  --accent-soft: rgba(207, 79, 45, 0.08);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  min-height: 100%;
+}
+
+
+body {
+  font-family: "Space Grotesk", "Segoe UI", sans-serif;
+  color: var(--ink);
+  background: radial-gradient(circle at 20% 10%, #fff4d9 0%, transparent 35%),
+    radial-gradient(circle at 85% 30%, #d6f3ff 0%, transparent 40%),
+    linear-gradient(145deg, var(--bg-top), var(--bg-bottom));
+}
+
+h2,
+p {
+  margin: 0;
+}
+
+h2 {
+  font-family: "Fraunces", "Times New Roman", serif;
+}
+
+.app-shell {
+  width: min(1160px, 100% - 24px);
+  margin: 24px auto;
+  padding: 22px;
+  border-radius: 18px;
+  border: 1px solid var(--line);
+  background: var(--card);
+  backdrop-filter: blur(8px);
+  box-shadow: 0 14px 40px rgba(15, 22, 34, 0.12);
+}
+
+.dashboard-headbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 12px;
+}
+
+.model-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 34px;
+  padding: 6px 14px;
+  border-radius: 10px;
+  background: #62b4de;
+  color: #09243b;
+  font-size: 1.95rem;
+  font-weight: 700;
+}
+
+.model-icon {
+  width: 18px;
+  height: 18px;
+  border-radius: 4px;
+  background: #9ad2eb;
+  position: relative;
+}
+
+.model-icon::after {
+  content: "";
+  position: absolute;
+  left: 4px;
+  top: 4px;
+  width: 0;
+  height: 0;
+  border-left: 5px solid transparent;
+  border-right: 5px solid transparent;
+  border-top: 8px solid rgba(255, 255, 255, 0.72);
+}
+
+.headbar-right {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.signal-group {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.signal-light {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  opacity: 0.28;
+  transition: opacity 0.15s ease, transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.signal-light.is-on {
+  opacity: 1;
+  transform: scale(1.04);
+}
+
+.signal-red {
+  background: #ff1b14;
+}
+
+.signal-red.is-on {
+  box-shadow: 0 0 0 4px rgba(255, 27, 20, 0.2);
+}
+
+.signal-yellow {
+  background: #f1ee00;
+}
+
+.signal-yellow.is-on {
+  box-shadow: 0 0 0 4px rgba(241, 238, 0, 0.22);
+}
+
+.signal-green {
+  background: #00f132;
+}
+
+.signal-green.is-on {
+  box-shadow: 0 0 0 4px rgba(0, 241, 50, 0.2);
+}
+
+.worker-box {
+  display: grid;
+  justify-items: end;
+  gap: 2px;
+}
+
+.worker-name {
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: #2f333c;
+}
+
+.head-logout-btn {
+  border: 0;
+  border-radius: 999px;
+  min-height: 22px;
+  padding: 1px 20px;
+  font-family: inherit;
+  font-size: 0.84rem;
+  background: #a2cfe3;
+  color: #1d3140;
+  cursor: pointer;
+}
+
+.head-logout-btn:hover {
+  filter: brightness(0.96);
+}
+
+.top-zone {
+  display: grid;
+  grid-template-columns: 280px 1fr;
+  gap: 24px;
+  margin-bottom: 14px;
+}
+
+.page-auto .top-zone {
+  grid-template-columns: 340px minmax(0, 1fr);
+  gap: 18px;
+}
+
+.side-menu {
+  display: grid;
+  align-content: start;
+  gap: 12px;
+}
+
+.menu-btn,
+.action-btn {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #ffffff;
+  color: var(--ink);
+  font-size: clamp(1rem, 1.5vw, 1.2rem);
+  line-height: 1.05;
+  padding: 12px 14px;
+  font-family: inherit;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background-color 0.2s ease, color 0.2s ease, transform 0.2s ease;
+}
+
+.menu-btn {
+  min-height: 56px;
+  text-align: left;
+}
+
+.log-display-box {
+  width: 100%;
+  min-height: 190px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 10px 12px;
+  background: #eef3f7;
+  color: #1e2a36;
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+  font-size: 0.8rem;
+  line-height: 1.45;
+  resize: vertical;
+  white-space: pre-wrap;
+}
+
+.log-display-box:focus {
+  outline: 2px solid #ffd3c8;
+  outline-offset: 1px;
+}
+
+.menu-btn.is-active {
+  background: var(--accent);
+  color: #ffffff;
+}
+
+.menu-btn:hover,
+.action-btn:hover,
+.ask-send-btn:hover {
+  transform: translateY(-1px);
+}
+
+.work-area {
+  min-height: 372px;
+}
+
+.simple-panel,
+.manual-panel {
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  min-height: 372px;
+  background: #ffffff;
+}
+
+.simple-panel {
+  background: #ffffff;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+}
+
+.simple-panel p {
+  color: var(--ink);
+  font-size: clamp(1.4rem, 2.2vw, 2.4rem);
+  font-weight: 700;
+  text-align: center;
+}
+
+.manual-panel {
+  display: grid;
+  grid-template-columns: 1fr 150px;
+  gap: 16px;
+  padding: 16px;
+}
+
+.manual-panel-full {
+  grid-template-columns: 1fr;
+}
+
+.manual-panel-full .camera-stage {
+  min-height: 340px;
+}
+
+.page-auto .manual-panel-full .camera-stage {
+  max-height: 480px;
+}
+
+.page-iot #iot-panel {
+  min-height: 540px;
+}
+
+.page-iot #iot-panel .camera-stage {
+  min-height: 420px;
+}
+
+.page-iot #iot-panel .control-stage {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  align-items: stretch;
+}
+
+.page-iot #iot-panel .status-box {
+  grid-column: 1 / -1;
+}
+
+.camera-stage {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  display: grid;
+  place-items: center;
+  color: #ecedef;
+  background: #273245;
+  min-height: 330px;
+  position: relative;
+  overflow: hidden;
+}
+
+.camera-overlay {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  z-index: 3;
+  min-width: 118px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.36);
+  background: rgba(12, 20, 31, 0.74);
+  color: #f0f4fa;
+  font-size: 0.86rem;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+}
+
+.overlay-title,
+.overlay-count {
+  margin: 0;
+}
+
+.overlay-title {
+  margin-bottom: 4px;
+  color: #d5dce8;
+  font-size: 0.72rem;
+  letter-spacing: 0.08em;
+}
+
+.overlay-count {
+  font-size: 1.05rem;
+  line-height: 1.25;
+}
+
+.overlay-ok {
+  color: #61f08f;
+}
+
+.overlay-ng {
+  color: #ff6d6d;
+}
+
+.camera-stage p {
+  font-size: clamp(1.6rem, 2.5vw, 2.8rem);
+}
+
+.camera-video {
+  width: 100%;
+  height: 100%;
+  min-height: 330px;
+  object-fit: cover;
+  background: #2c2d30;
+}
+
+.camera-placeholder {
+  position: absolute;
+  inset: auto 10px 10px 10px;
+  margin: 0;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: rgba(23, 32, 48, 0.74);
+  font-size: 1rem;
+  text-align: center;
+}
+
+.camera-canvas {
+  display: none;
+}
+
+.control-stage {
+  display: grid;
+  align-content: start;
+  gap: 12px;
+}
+
+.action-btn {
+  min-height: 50px;
+  font-size: clamp(1.2rem, 1.8vw, 2rem);
+}
+
+.status-box {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--accent-soft);
+  min-height: 104px;
+  padding: 16px 12px;
+  display: grid;
+  align-content: center;
+  gap: 8px;
+}
+
+.status-box p {
+  font-size: clamp(1.3rem, 1.8vw, 2rem);
+}
+
+.chatbot-bar,
+.ask-bar {
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: #ffffff;
+  min-height: 88px;
+  display: grid;
+  align-content: center;
+  justify-items: stretch;
+  gap: 10px;
+  margin-top: 10px;
+  text-align: center;
+  padding: 12px 16px;
+}
+
+.chatbot-tabs {
+  gap: 0;
+  padding-top: 0;
+  background: #cfd0d2;
+}
+
+.configuration-tabs-shell {
+  width: 100%;
+  display: grid;
+  align-content: start;
+  gap: 0;
+  border-radius: 12px;
+  overflow: hidden;
+  border: 1px solid rgba(23, 32, 48, 0.2);
+  background: #d7d9dc;
+}
+
+.configuration-tab-list {
+  display: flex;
+  gap: 6px;
+  align-items: flex-end;
+  padding: 8px 8px 0;
+  background: #c2c5ca;
+}
+
+button.configuration-tab,
+button.configuration-tab-is-active {
+  margin: 0;
+  border: 0;
+  border-radius: 10px 10px 0 0;
+  min-height: 38px;
+  padding: 8px 14px;
+  font-family: inherit;
+  font-size: 0.95rem;
+  font-weight: 700;
+  line-height: 1;
+  color: #20222a;
+  cursor: pointer;
+  transition: background-color 0.2s ease, color 0.2s ease;
+}
+
+button.configuration-tab {
+  background: #9ea2a8;
+}
+
+button.configuration-tab:hover {
+  background: #b1b5bb;
+}
+
+button.configuration-tab-is-active {
+  background: #e2e4e7;
+  color: #16181d;
+}
+
+.configuration-tab-panel {
+  border-radius: 0 0 12px 12px;
+  background: #e2e4e7;
+  padding: 14px;
+  display: grid;
+  align-content: start;
+  gap: 12px;
+  min-height: 470px;
+}
+
+.configuration-tab-panel[hidden] {
+  display: none;
+}
+
+.configuration-face-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(280px, 1fr);
+  gap: 12px;
+  align-items: start;
+}
+
+.configuration-face-card,
+.configuration-account-card {
+  border: 1px solid rgba(23, 32, 48, 0.16);
+  border-radius: 12px;
+  background: #f1f3f6;
+  padding: 12px;
+  display: grid;
+  gap: 10px;
+}
+
+.configuration-face-id-item {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 700;
+  color: #1c222c;
+}
+
+.configuration-subtext {
+  margin: 0;
+  color: #4e5869;
+  font-size: 0.86rem;
+}
+
+.configuration-register-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.configuration-register-btn {
+  border: 0;
+  border-radius: 10px;
+  min-height: 36px;
+  padding: 8px 16px;
+  font-family: inherit;
+  font-size: 0.9rem;
+  font-weight: 700;
+  color: #ffffff;
+  background: #cf4f2d;
+  cursor: pointer;
+}
+
+.configuration-register-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.configuration-face-video {
+  width: 100%;
+  justify-self: center;
+  aspect-ratio: 16 / 9;
+  min-height: 260px;
+  border-radius: 12px;
+  border: 1px solid rgba(23, 32, 48, 0.22);
+  background: #161e2a;
+}
+
+.configuration-account-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.configuration-badge {
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-size: 0.74rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: #6f5310;
+  background: #ffe7a3;
+}
+
+.configuration-search-wrap {
+  display: grid;
+  gap: 6px;
+}
+
+.configuration-search-input {
+  width: 100%;
+  min-height: 38px;
+  border: 1px solid rgba(23, 32, 48, 0.2);
+  border-radius: 10px;
+  padding: 8px 10px;
+  font-family: inherit;
+  font-size: 0.9rem;
+  color: #1b2635;
+  background: #ffffff;
+}
+
+.configuration-account-list {
+  border: 1px solid rgba(23, 32, 48, 0.16);
+  border-radius: 10px;
+  overflow: hidden;
+  background: #ffffff;
+  max-height: min(46vh, 360px);
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+.configuration-account-list-body {
+  max-height: min(40vh, 300px);
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+.configuration-account-list-body::-webkit-scrollbar {
+  width: 8px;
+}
+
+.configuration-account-list-body::-webkit-scrollbar-thumb {
+  background: rgba(23, 32, 48, 0.25);
+  border-radius: 999px;
+}
+
+.configuration-account-row {
+  display: grid;
+  grid-template-columns: 0.8fr 1.3fr 1fr 0.8fr;
+}
+
+.configuration-account-row span {
+  padding: 8px 10px;
+  border-top: 1px solid rgba(23, 32, 48, 0.12);
+  border-right: 1px solid rgba(23, 32, 48, 0.12);
+  font-size: 0.86rem;
+  color: #253244;
+}
+
+.configuration-account-row span:last-child {
+  border-right: 0;
+}
+
+.configuration-account-row.is-head span {
+  border-top: 0;
+  font-weight: 700;
+  color: #162131;
+  background: #e8edf4;
+}
+
+.configuration-select-btn {
+  border: 0;
+  border-radius: 8px;
+  min-height: 28px;
+  padding: 4px 8px;
+  font-family: inherit;
+  font-size: 1.02rem;
+  font-weight: 700;
+  color: #223347;
+  background: #dce4ef;
+  cursor: pointer;
+}
+
+.configuration-select-btn.is-selected {
+  color: #ffffff;
+  background: #3e7bba;
+}
+
+.chat-tab-list {
+  display: flex;
+  gap: 8px;
+  padding: 0 8px;
+  justify-content: flex-start;
+}
+
+.chat-tab {
+  border: 0;
+  border-radius: 12px 12px 0 0;
+  padding: 8px 18px;
+  font-family: inherit;
+  font-size: 0.92rem;
+  font-weight: 700;
+  background: #a8a9ab;
+  color: #20222a;
+  cursor: pointer;
+}
+
+.chat-tab.is-active {
+  background: #c8c9cb;
+}
+
+.chat-tab-panel {
+  border-radius: 0 0 14px 14px;
+  background: #c8c9cb;
+  padding: 14px;
+  display: grid;
+  gap: 14px;
+}
+
+.chat-tab-panel[hidden] {
+  display: none;
+}
+
+.chat-question-item {
+  margin: 0;
+  border-radius: 18px;
+  background: #ecd0d2;
+  color: #59555a;
+  font-size: clamp(1.05rem, 2vw, 2.65rem);
+  padding: 16px 24px;
+  text-align: left;
+}
+
+.chat-question-list {
+  display: grid;
+  gap: 12px;
+}
+
+.chat-question-btn {
+  width: 100%;
+  border: 0;
+  font-family: inherit;
+  cursor: pointer;
+  transition: transform 0.15s ease, box-shadow 0.15s ease, filter 0.15s ease;
+}
+
+.chat-question-btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 8px 18px rgba(29, 36, 49, 0.12);
+  filter: brightness(0.985);
+}
+
+.chat-question-btn.is-loading {
+  opacity: 0.72;
+  cursor: wait;
+}
+
+[data-chat-panel="simple"] .chat-question-item {
+  font-size: clamp(0.52rem, 1vw, 1.32rem);
+}
+
+.simple-chat-display {
+  width: 100%;
+  min-height: 180px;
+  margin-top: 4px;
+}
+
+.simple-chat-item-open {
+  cursor: default;
+  display: grid;
+  gap: 10px;
+  background: #e8eff8;
+  border: 1px solid rgba(36, 57, 83, 0.25);
+}
+
+.simple-chat-item-open.is-loading {
+  opacity: 0.82;
+}
+
+.simple-chat-item-head {
+  display: flex;
+  align-items: center;
+}
+
+.simple-chat-item-title {
+  font-size: 0.88rem;
+  font-weight: 700;
+  color: #24344a;
+}
+
+.simple-chat-item-display {
+  width: 100%;
+  min-height: 150px;
+  margin: 0;
+}
+
+.simple-chat-item-form {
+  display: grid;
+  grid-template-columns: 1fr 120px;
+  gap: 10px;
+  width: 100%;
+}
+
+.chat-display-box {
+  width: min(920px, 100%);
+  min-height: 96px;
+  justify-self: center;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 10px 12px;
+  background: #f7f9fc;
+  color: var(--ink);
+  font-family: inherit;
+  font-size: 0.96rem;
+  line-height: 1.45;
+  resize: vertical;
+}
+
+.chat-display-box:focus {
+  outline: 2px solid #ffd3c8;
+  outline-offset: 1px;
+}
+
+.chat-thread {
+  width: min(920px, 100%);
+  min-height: 96px;
+  max-height: 360px;
+  justify-self: center;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 12px;
+  background: #f7f9fc;
+  overflow: auto;
+  display: grid;
+  gap: 10px;
+}
+
+.chat-msg-row {
+  display: flex;
+}
+
+.chat-msg-row.is-user {
+  justify-content: flex-end;
+}
+
+.chat-msg-row.is-assistant {
+  justify-content: flex-start;
+}
+
+.chat-msg-bubble {
+  max-width: min(80ch, 88%);
+  display: grid;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(36, 57, 83, 0.2);
+  background: #ffffff;
+  color: #1f2c3d;
+}
+
+.chat-msg-row.is-user .chat-msg-bubble {
+  background: #e8f0ff;
+  border-color: rgba(58, 96, 156, 0.35);
+}
+
+.chat-msg-content {
+  white-space: pre-wrap;
+  line-height: 1.5;
+}
+
+.chat-msg-tools {
+  display: grid;
+  gap: 8px;
+}
+
+.chat-source-toggle {
+  width: 24px;
+  height: 24px;
+  border-radius: 999px;
+  border: 1px solid rgba(36, 57, 83, 0.35);
+  background: #f0f5ff;
+  color: #213046;
+  font-weight: 700;
+  cursor: pointer;
+  display: inline-grid;
+  place-items: center;
+  padding: 0;
+}
+
+.chat-source-panel {
+  border: 1px solid rgba(36, 57, 83, 0.2);
+  border-radius: 8px;
+  background: #ffffff;
+  padding: 8px 10px;
+  display: grid;
+  gap: 6px;
+}
+
+.chat-source-panel a {
+  color: #2456b3;
+  font-size: 0.85rem;
+  text-decoration: none;
+  word-break: break-all;
+}
+
+.chat-source-panel a:hover {
+  text-decoration: underline;
+}
+
+.handover-board {
+  border-radius: 14px;
+  overflow: hidden;
+  background: #cbeecf;
+  border: 1px solid rgba(34, 66, 44, 0.25);
+}
+
+.handover-row {
+  display: grid;
+  grid-template-columns: 1.2fr 3.8fr 1.3fr;
+  min-height: 32px;
+}
+
+.handover-row span {
+  display: grid;
+  align-items: center;
+  justify-items: center;
+  padding: 4px 8px;
+  border-right: 1px solid rgba(34, 66, 44, 0.35);
+  border-top: 1px solid rgba(34, 66, 44, 0.35);
+  color: #2e3d31;
+  font-size: 0.93rem;
+}
+
+.handover-row span:last-child {
+  border-right: 0;
+}
+
+.handover-row:first-child span {
+  border-top: 0;
+}
+
+.handover-head span {
+  font-weight: 700;
+}
+
+.chatbot-bar h2,
+.ask-bar h2 {
+  font-weight: 600;
+  font-size: clamp(1.8rem, 2.5vw, 3rem);
+  letter-spacing: 0.01em;
+}
+
+.ask-form {
+  display: grid;
+  grid-template-columns: auto 1fr 120px;
+  gap: 10px;
+  width: min(920px, 100%);
+  justify-self: center;
+  align-items: center;
+}
+
+.ask-voice-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ask-voice-btn {
+  min-width: 42px;
+  height: 42px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #fff;
+  font-size: 1rem;
+  cursor: pointer;
+}
+
+.ask-voice-btn:hover {
+  background: #f3f6fb;
+}
+
+.ask-voice-btn.recording {
+  background: #ffd7d2;
+  border-color: #ff8f80;
+}
+
+.ask-voice-btn.is-off {
+  opacity: 0.5;
+}
+
+.ask-toggle-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.82rem;
+  color: #2c3d52;
+}
+
+.ask-input {
+  width: 100%;
+  min-height: 46px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 10px 12px;
+  font-family: inherit;
+  font-size: 1rem;
+  color: var(--ink);
+}
+
+.ask-input:focus {
+  outline: 2px solid #ffd3c8;
+  outline-offset: 1px;
+}
+
+.ask-send-btn {
+  min-height: 46px;
+  border: 0;
+  border-radius: 10px;
+  background: var(--accent);
+  color: #ffffff;
+  font-family: inherit;
+  font-size: 1rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.ask-send-btn:hover {
+  background: var(--accent-dark);
+}
+
+@media (max-width: 900px) {
+  .dashboard-headbar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .headbar-right {
+    justify-content: space-between;
+  }
+
+  .model-badge {
+    font-size: 1.4rem;
+  }
+
+  .top-zone {
+    grid-template-columns: 1fr;
+  }
+
+  .side-menu {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .menu-btn:last-child {
+    grid-column: span 2;
+  }
+
+  .manual-panel {
+    grid-template-columns: 1fr;
+  }
+
+  .control-stage {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .status-box {
+    grid-column: span 2;
+  }
+
+  .configuration-face-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .configuration-tab-panel {
+    min-height: 360px;
+  }
+}
+
+@media (max-width: 560px) {
+  .app-shell {
+    width: min(1160px, 100% - 12px);
+    padding: 12px;
+  }
+
+  .side-menu {
+    grid-template-columns: 1fr;
+  }
+
+  .menu-btn:last-child,
+  .status-box {
+    grid-column: auto;
+  }
+
+  .control-stage {
+    grid-template-columns: 1fr;
+  }
+
+  .ask-form {
+    grid-template-columns: 1fr;
+  }
+
+  .simple-chat-item-form {
+    grid-template-columns: 1fr;
+  }
+
+  .ask-voice-controls {
+    justify-content: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .chat-tab-list {
+    overflow-x: auto;
+    padding-bottom: 6px;
+  }
+
+  .chat-tab {
+    white-space: nowrap;
+  }
+
+  .chat-question-item {
+    padding: 14px 16px;
+    font-size: 1.25rem;
+  }
+
+  .configuration-account-row {
+    grid-template-columns: 0.8fr 1.1fr 1fr 0.8fr;
+  }
+}
+
+
+====================================================================================================
+FILE: nginx/html/css/style.css
+====================================================================================================
+
+:root {
+  --bg-top: #f6f2e9;
+  --bg-bottom: #d8e3f4;
+  --ink: #172030;
+  --muted: #586174;
+  --card: rgba(255, 255, 255, 0.78);
+  --line: rgba(23, 32, 48, 0.15);
+  --accent: #cf4f2d;
+  --accent-dark: #9c3317;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  min-height: 100%;
+}
+
+body {
+  font-family: "Space Grotesk", "Segoe UI", sans-serif;
+  color: var(--ink);
+  background: radial-gradient(circle at 20% 10%, #fff4d9 0%, transparent 35%),
+    radial-gradient(circle at 85% 30%, #d6f3ff 0%, transparent 40%),
+    linear-gradient(145deg, var(--bg-top), var(--bg-bottom));
+}
+
+h1,
+h2 {
+  font-family: "Fraunces", "Times New Roman", serif;
+  margin: 0;
+}
+
+.shell {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+}
+
+.card {
+  width: min(100%, 540px);
+  border: 1px solid var(--line);
+  background: var(--card);
+  backdrop-filter: blur(8px);
+  border-radius: 18px;
+  padding: 28px;
+  box-shadow: 0 14px 40px rgba(15, 22, 34, 0.12);
+}
+
+.card-login h1 {
+  font-size: clamp(2rem, 5vw, 2.6rem);
+}
+
+.card-login {
+  width: min(100%, 960px);
+}
+
+.card-login h2 {
+  font-size: 1.25rem;
+}
+
+.login-layout {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 18px;
+  margin-top: 16px;
+}
+
+.login-pane {
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 18px;
+  background: rgba(255, 255, 255, 0.82);
+}
+
+.face-pane {
+  display: grid;
+  gap: 10px;
+  align-content: start;
+}
+
+.face-video {
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: #121821;
+  object-fit: cover;
+}
+
+.face-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.face-status {
+  margin: 0;
+  min-height: 1.4em;
+}
+
+.eyebrow {
+  margin: 0 0 8px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-weight: 700;
+  font-size: 0.72rem;
+  color: var(--accent-dark);
+}
+
+.muted {
+  color: var(--muted);
+  margin: 8px 0 20px;
+}
+
+.form {
+  display: grid;
+  gap: 10px;
+}
+
+label {
+  font-weight: 600;
+  font-size: 0.95rem;
+}
+
+input {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 12px;
+  font-size: 1rem;
+  background: #ffffff;
+}
+
+button {
+  margin-top: 12px;
+  border: 0;
+  border-radius: 12px;
+  padding: 12px 16px;
+  font-size: 1rem;
+  font-weight: 700;
+  cursor: pointer;
+  background: var(--accent);
+  color: #ffffff;
+}
+
+button:hover {
+  background: var(--accent-dark);
+}
+
+.error {
+  min-height: 1.2em;
+  color: #a82323;
+  margin: 4px 0 0;
+  font-size: 0.92rem;
+}
+
+.dashboard-head {
+  width: min(100%, 900px);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 18px;
+}
+
+.page-dashboard .shell {
+  align-content: start;
+  padding-top: 56px;
+}
+
+.page-dashboard .card {
+  width: min(100%, 900px);
+}
+
+.ghost {
+  background: transparent;
+  color: var(--ink);
+  border: 1px solid var(--line);
+}
+
+.stats {
+  margin-top: 18px;
+  display: grid;
+  gap: 14px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.stats article {
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 16px;
+  background: #ffffff;
+}
+
+.label {
+  margin: 0;
+  color: var(--muted);
+}
+
+.value {
+  margin: 8px 0 0;
+  font-size: 2rem;
+  font-weight: 700;
+}
+
+.reveal {
+  opacity: 0;
+  transform: translateY(10px);
+  animation: reveal 0.6s ease-out forwards;
+}
+
+.delay-1 {
+  animation-delay: 0.15s;
+}
+
+@keyframes reveal {
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (max-width: 760px) {
+  .card,
+  .dashboard-head,
+  .page-dashboard .card {
+    width: 100%;
+  }
+
+  .login-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .stats {
+    grid-template-columns: 1fr;
+  }
+}
+
+

@@ -1,0 +1,486 @@
+/* web_login 전용 스타일시트
+   - 브라우저 기반 dashboard 로그인 화면만 담당한다
+   - on-device 로그인(login.html / js/login.js)과는 별도 흐름이다 */
+
+/* ── 기본 리셋 / 공통 베이스 ── */
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+/* ── 디자인 토큰 ── */
+:root {
+  /* 로그인 화면 전체에서 재사용하는 디자인 토큰. 간격/색/반경을 여기서 통일한다. */
+  --slate-900: #0f172a;
+  --slate-700: #334155;
+  --slate-500: #64748b;
+  --slate-400: #94a3b8;
+  --slate-300: #CBD5E1;
+  --slate-200: #E2E8F0;
+  --slate-100: #F1F5F9;
+  --slate-50:  #F8FAFC;
+  --text-primary: #1e293b;
+  --text-secondary: #475569;
+  --bg-page: #E8EDF4;
+  --bg-card: #ffffff;
+  --radius-card: 16px;
+  --radius-input: 8px;
+  --radius-btn: 8px;
+  --radius-tab: 6px;
+  --shadow-card: 0 4px 6px rgba(51,65,85,.05), 0 16px 48px rgba(51,65,85,.12);
+  --transition: 0.18s ease;
+  --font-sans: 'Noto Sans KR', 'DM Sans', sans-serif;
+  --font-mono: 'DM Mono', monospace;
+}
+
+html, body {
+  height: 100%;
+  font-family: var(--font-sans);
+  background-color: var(--bg-page);
+  color: var(--text-primary);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ── 배경 그리드 ── */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background-image:
+    linear-gradient(rgba(51,65,85,.05) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(51,65,85,.05) 1px, transparent 1px);
+  background-size: 48px 48px;
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* ── 전체 레이아웃 ── */
+.wrap {
+  position: relative;
+  z-index: 1;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 32px 16px;
+}
+
+/* ── 로그인 카드 ── */
+.card {
+  width: 100%;
+  max-width: 440px;
+  background: var(--bg-card);
+  border-radius: var(--radius-card);
+  padding: 40px 44px;
+  box-shadow: var(--shadow-card);
+}
+
+/* ── 브랜드 / 회사명 ── */
+.company-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 28px;
+}
+
+.lmark {
+  width: 32px;
+  height: 32px;
+  background: var(--slate-700);
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.lmark svg {
+  width: 16px;
+  height: 16px;
+}
+
+.company-name {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--slate-700);
+}
+
+/* ── 로그인 헤더 ── */
+.eyebrow {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--slate-400);
+  letter-spacing: .12em;
+  margin-bottom: 4px;
+}
+
+.form-title {
+  font-size: 26px;
+  font-weight: 500;
+  color: var(--text-primary);
+  letter-spacing: -.02em;
+  margin-bottom: 24px;
+}
+
+/* ── 로그인 방식 전환 탭 ── */
+.tab-wrap {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 24px;
+}
+
+.tab {
+  padding: 7px 16px;
+  border-radius: var(--radius-tab);
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 400;
+  color: var(--slate-500);
+  border: 1px solid var(--slate-200);
+  background: var(--slate-50);
+  font-family: var(--font-sans);
+  transition: all var(--transition);
+  white-space: nowrap;
+}
+
+.tab:hover:not(.active) {
+  border-color: var(--slate-700);
+  color: var(--slate-700);
+  background: #fff;
+}
+
+.tab.active {
+  background: var(--slate-700);
+  color: #fff;
+  border-color: var(--slate-700);
+  font-weight: 500;
+}
+
+/* Face 로그인 패널도 같은 카드 안에서 전환되므로 기본 톤과 인터랙션을 최대한 공유한다. */
+
+/* ── 입력 필드 / 아이콘 래퍼 ── */
+.field {
+  margin-bottom: 16px;
+}
+
+.field-label {
+  display: block;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  margin-bottom: 6px;
+}
+
+.iwrap {
+  position: relative;
+}
+
+.iico {
+  position: absolute;
+  left: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  align-items: center;
+  pointer-events: none;
+}
+
+.iico svg {
+  width: 15px;
+  height: 15px;
+}
+
+.ginput {
+  width: 100%;
+  background: var(--slate-50);
+  border: 1px solid var(--slate-200);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  font-weight: 300;
+  padding: 11px 14px 11px 38px;
+  border-radius: var(--radius-input);
+  outline: none;
+  transition: border-color var(--transition), box-shadow var(--transition), background var(--transition);
+}
+
+.ginput::placeholder {
+  color: var(--slate-300);
+}
+
+.ginput:focus {
+  border-color: var(--slate-700);
+  box-shadow: 0 0 0 3px rgba(51,65,85,.08);
+  background: #fff;
+}
+
+/* ── 아이디 저장 / 비밀번호 찾기 영역 ── */
+.row-middle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 12px 0 20px;
+}
+
+.save-id {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  cursor: pointer;
+}
+
+.save-id input[type="checkbox"] {
+  width: 15px;
+  height: 15px;
+  accent-color: var(--slate-700);
+  cursor: pointer;
+}
+
+.save-id span {
+  font-size: 13px;
+  font-weight: 400;
+  color: var(--text-secondary);
+}
+
+.forgot {
+  font-size: 12px;
+  color: var(--slate-400);
+  text-decoration: none;
+  transition: color var(--transition);
+}
+
+.forgot:hover {
+  color: var(--slate-700);
+}
+
+/* ── 로그인 / 액션 버튼 ── */
+.btn-login {
+  display: block;
+  width: 100%;
+  background-color: #94a3b8;
+  border: none;
+  color: #fff;
+  font-family: var(--font-sans);
+  font-size: 14px;
+  font-weight: 500;
+  padding: 13px;
+  border-radius: var(--radius-btn);
+  cursor: pointer;
+  transition: background-color var(--transition), transform 0.1s;
+  text-align: center;
+}
+
+.btn-login:hover {
+  background-color: var(--slate-700);
+}
+
+.btn-login:active {
+  transform: scale(.99);
+}
+
+/* ── Face ID 패널 ── */
+.face-panel {
+  display: none;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 16px 0;
+  width: 100%;
+}
+
+.face-panel.show {
+  display: flex;
+}
+
+.face-field {
+  width: 100%;
+  margin-bottom: 4px;
+}
+
+@keyframes face-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50%       { opacity: .65; transform: scale(.96); }
+}
+
+.face-video {
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  border-radius: 14px;
+  border: 1px solid var(--slate-200);
+  background:
+    linear-gradient(180deg, rgba(148, 163, 184, 0.08), rgba(148, 163, 184, 0.18)),
+    var(--slate-900);
+  object-fit: cover;
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,0.04);
+}
+
+.face-actions {
+  width: 100%;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.face-btn {
+  width: 100%;
+  border: none;
+  border-radius: var(--radius-btn);
+  padding: 12px 14px;
+  font-family: var(--font-sans);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: transform 0.12s ease, background-color var(--transition), border-color var(--transition), color var(--transition);
+}
+
+.face-btn:hover {
+  transform: translateY(-1px);
+}
+
+.face-btn--primary {
+  background: var(--slate-700);
+  color: #fff;
+}
+
+.face-btn--primary:hover {
+  background: var(--slate-900);
+}
+
+.face-btn--ghost {
+  background: var(--slate-50);
+  color: var(--slate-700);
+  border: 1px solid var(--slate-200);
+}
+
+.face-btn--ghost:hover {
+  background: #fff;
+  border-color: var(--slate-400);
+}
+
+.face-status {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--slate-700);
+  letter-spacing: .06em;
+  min-height: 1.4em;
+}
+
+.face-desc {
+  font-size: 12px;
+  font-weight: 300;
+  color: var(--slate-400);
+  text-align: center;
+  line-height: 1.7;
+  min-height: 3.4em;
+}
+
+/* ── 하단 ── */
+.bottom-note {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 20px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--slate-400);
+  text-align: center;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+.bdot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--slate-400);
+  flex-shrink: 0;
+  animation: blink 2.5s infinite;
+}
+
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: .3; }
+}
+
+/* ── 패널 토글 ── */
+.id-panel {
+  display: flex;
+  flex-direction: column;
+}
+
+.id-panel.hide {
+  display: none;
+}
+
+/* ────────────────────────────
+   반응형
+──────────────────────────── */
+
+/* 태블릿 */
+@media (max-width: 768px) {
+  .card {
+    padding: 32px 28px;
+  }
+
+  .form-title {
+    font-size: 22px;
+  }
+}
+
+/* 모바일 */
+@media (max-width: 480px) {
+  .wrap {
+    justify-content: flex-start;
+    padding-top: 40px;
+  }
+
+  .card {
+    padding: 28px 22px;
+    border-radius: 12px;
+  }
+
+  .company-row {
+    margin-bottom: 20px;
+  }
+
+  .form-title {
+    font-size: 22px;
+    margin-bottom: 18px;
+  }
+
+  .tab {
+    font-size: 12px;
+    padding: 7px 13px;
+  }
+
+  .ginput {
+    font-size: 15px;
+    padding: 13px 14px 13px 38px;
+    border-radius: 10px;
+  }
+
+  .btn-login {
+    font-size: 15px;
+    padding: 14px;
+    border-radius: 10px;
+  }
+
+  .save-id span {
+    font-size: 13px;
+  }
+
+  .forgot {
+    font-size: 12px;
+  }
+
+  .face-actions {
+    grid-template-columns: 1fr;
+  }
+
+  .bottom-note {
+    font-size: 9px;
+  }
+}

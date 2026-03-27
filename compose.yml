@@ -1,0 +1,62 @@
+# !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!DO NOT TOUCH THIS FILE EXCEPT DEVELOPMENT MANAGER!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+services:
+  webserver:
+    build:
+      context: ./nginx
+    container_name: final_project_rss_webserver
+    ports:
+      - "40916:80"
+      - "40943:443"
+    volumes:
+      - ./nginx/html:/usr/share/nginx/html:ro
+      - ./nginx/conf.d/default.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./nginx/certs:/etc/nginx/certs:ro
+    restart: unless-stopped
+
+  server_api:
+    build:
+      context: ./server_api
+    container_name: final_project_rss_server_api
+    ports:
+      - "40918:8000"
+    volumes:
+      - ./server_api/src:/app/src
+      - ./.env:/app/.env:ro
+    environment:
+      - DATABASE_URL=${DATABASE_URL}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: final_project_rss_postgres
+    ports:
+      - "40919:5432"
+    environment:
+      - POSTGRES_DB=${POSTGRES_DB}
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  redis:
+    build:
+      context: ./redis
+    container_name: final_project_rss_redis
+    ports:
+      - "40917:6379"
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+
+volumes:
+  redis_data:
+  postgres_data:

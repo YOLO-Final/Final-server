@@ -1,0 +1,143 @@
+flowchart TD
+    %% ── 클라이언트 영역 ──────────────────────────────────────────
+    subgraph CLIENT["브라우저 (클라이언트)"]
+        direction TB
+        HTML["web_dashboard.html\n(4탭: worker · qa · manager · promo)"]
+        JS_STATE["dashboard_state.js\n세션/토큰 관리"]
+        JS_API["dashboard_api.js\n API 호출 · 60초 자동갱신"]
+        JS_APP["dashboard_app.js\n렌더링 오케스트레이터"]
+        HTML --> JS_STATE --> JS_API --> JS_APP
+    end
+
+    %% ── 인프라 영역 ──────────────────────────────────────────────
+    subgraph INFRA["Docker Compose 인프라"]
+        direction LR
+
+        subgraph NGINX["Nginx (webserver)\n:40943 HTTPS / :40916 HTTP"]
+            direction TB
+            NGINX_SSL["SSL 종료\n(자체서명 인증서)"]
+            NGINX_STATIC["정적 파일 제공\n/html/*.html · css · js\nCache-Control: no-store"]
+            NGINX_PROXY["Reverse Proxy\n/api/* → server_api:8000"]
+        end
+
+        subgraph FASTAPI["FastAPI (server_api)\n:8000"]
+            direction TB
+
+            subgraph STARTUP["앱 시작 (on_startup)"]
+                SEED_DB["테이블 자동 생성\nBase.metadata.create_all()"]
+                SEED_ADMIN["관리자 계정 시드\nseed_test_admin_user()"]
+                SEED_DUMMY["대시보드 더미 데이터 시드\nensure_dashboard_dummy_data()\n2026-03-20 ~ 2026-03-25"]
+            end
+
+            subgraph ROUTER["api/v1/router.py\n(APIRouter 집계)"]
+                R_AUTH["auth_router\n/api/v1/auth"]
+                R_DASH["dashboard_router\n/api/v1/dashboard"]
+                R_LLM["llm_router\n/api/v1/llm"]
+                R_VISION["vision_router\n/api/v1/vision"]
+                R_RAG["rag_router\n/api/v1/rag"]
+                R_REPORT["report_router\n/api/v1/report"]
+                R_OPT["optimization_router\n/api/v1/optimization"]
+                R_VOICE["voice_router\n/api/v1/voice_interaction"]
+            end
+
+            subgraph AUTH_MOD["modules/auth/"]
+                AUTH_ROUTER["router.py\nPOST /login\nPOST /login/face\nPOST /refresh\nPOST /logout\nGET /users/{id}\nPATCH /users/{id}/*\nGET/POST /face/*"]
+                AUTH_SERVICE["service.py\nlogin_with_password()\nface_login_with_matching()\nrefresh_access_token()\nregister_face_embedding()"]
+                AUTH_JWT["jwt.py\nget_current_user()\nJWT 검증 의존성"]
+                AUTH_DB["db/\nmodel.py\n  UserTable\n  FaceEmbeddingTable\n  VectorTable\ncrud.py · schema.py"]
+                AUTH_ROUTER --> AUTH_SERVICE --> AUTH_DB
+                AUTH_JWT -.->|Bearer 검증| AUTH_ROUTER
+            end
+
+            subgraph DASH_MOD["modules/dashboard/\n★ web_dashboard.html 핵심 BE ★"]
+                direction TB
+                DASH_ROUTER["router.py\n────────────────\nGET /web/worker\nGET /web/qa\nGET /web/manager\nGET /web/promo\n────────────────\nGET /kpis?screen=\nGET /datasets?screen=\nGET /detail\nGET /status\n(모든 엔드포인트: JWT 필수)"]
+
+                DASH_SERVICE["service.py\n────────────────\nget_web_worker_dashboard()\nget_web_qa_dashboard()\nget_web_manager_dashboard()\nget_web_promo_dashboard()\n────────────────\nKPI 계산 · OEE 산출\n불량률 분석 · 시나리오 시간 계산\nSTALE_AFTER_HOURS=6\nKST(+09:00) 기준"]
+
+                DASH_REPO["repository.py\n────────────────\nDashboardLiveSnapshot\nWebDashboardSnapshot\n────────────────\nget_web_dashboard_snapshot()\nget_dashboard_live_snapshot()\nget_defect_detail()\nget_request_detail()\nget_employee_line_code()\n────────────────\n(SQLAlchemy text() 로 raw SQL 실행)"]
+
+                DASH_SCHEMA["schemas.py\n────────────────\nKpiItem\nAssistiveItem\nDashboardKpiGroup\nDashboardAssistiveGroup\nDashboardKPIResponse\nDashboardDatasetsResponse\nDashboardDetailRequest\nDashboardDetailResponse"]
+
+                DASH_DB_MODEL["db/model.py (21 테이블)\n────────────────\nFactoryTable\nLineTable\nEquipmentTable\nEmployeeTable\nProductionRecordTable\nInspectionResultTable\nDefectResultTable\nAlarmTable\n+ 13개 부가 테이블"]
+
+                DASH_ROUTER -->|"Depends(get_current_user)"| AUTH_JWT
+                DASH_ROUTER --> DASH_SERVICE
+                DASH_SERVICE --> DASH_SCHEMA
+                DASH_SERVICE --> DASH_REPO
+                DASH_REPO --> DASH_DB_MODEL
+            end
+
+            subgraph COMMON["modules/common/"]
+                RBAC["rbac.py\n역할 기반 접근 제어"]
+                AUDIT["audit.py\n감사 로그"]
+            end
+
+            subgraph LIB["lib/"]
+                LIB_DB["database.py\nSQLAlchemy engine\nSessionLocal\nget_db()"]
+                LIB_SETTINGS["settings.py\napp_name · app_version\ndatabase_url · api_v1_prefix"]
+                LIB_ENV["env_loader.py\n.env 파일 로드"]
+            end
+        end
+
+        subgraph PG["PostgreSQL :5432\nschema: wed_dashboard"]
+            PG_MASTER["마스터 테이블\nfactories · lines\nequipments · employees"]
+            PG_PROD["생산 데이터\nproduction_records\ninspection_results\ndefect_results"]
+            PG_OPS["운영 데이터\nequipment_status_history\nalarms · events\ndowntimes · requests"]
+            PG_AUTH["인증 테이블\nusers · face_embeddings\nvectors"]
+        end
+
+        subgraph REDIS["Redis :6379"]
+            REDIS_CACHE["세션 캐시\n토큰 블랙리스트"]
+        end
+    end
+
+    %% ── 외부 서비스 (대시보드 직접 관련 범위 밖) ──────────────
+    subgraph EXT["외부 AI 서비스 (llm·rag·vision 모듈)"]
+        OPENAI["OpenAI API"]
+        GEMINI["Google Gemini API"]
+        FAISS["FAISS 벡터 검색"]
+    end
+
+    %% ── 연결선 ──────────────────────────────────────────────────
+
+    %% 브라우저 → Nginx
+    JS_API -->|"HTTPS :40943\nGET /api/v1/dashboard/web/{tab}\nAuthorization: Bearer {JWT}"| NGINX_PROXY
+    JS_API -->|"POST /api/v1/auth/login\nPOST /api/v1/auth/refresh"| NGINX_PROXY
+
+    %% Nginx → FastAPI
+    NGINX_PROXY -->|"HTTP proxy\nX-Real-IP · X-Forwarded-*"| R_AUTH
+    NGINX_PROXY -->|"HTTP proxy"| R_DASH
+    NGINX_PROXY -->|"HTTP proxy"| R_LLM
+
+    %% Router → Module
+    R_AUTH --> AUTH_ROUTER
+    R_DASH --> DASH_ROUTER
+
+    %% FastAPI → DB
+    DASH_REPO -->|"engine.connect()\ntext() SQL"| PG_MASTER
+    DASH_REPO -->|"집계 쿼리"| PG_PROD
+    DASH_REPO -->|"상태·알람 조회"| PG_OPS
+    AUTH_DB -->|"ORM Session"| PG_AUTH
+    LIB_DB -->|"create_engine()\npool_pre_ping=True"| PG_MASTER
+
+    %% FastAPI → Redis
+    AUTH_SERVICE -->|"토큰 관리"| REDIS_CACHE
+
+    %% LLM 모듈 → 외부
+    R_LLM -->|"API 호출"| OPENAI
+    R_LLM -->|"API 호출"| GEMINI
+    R_RAG -->|"벡터 검색"| FAISS
+
+    %% 스타일 ──────────────────────────────────────────────────
+    style DASH_MOD fill:#1a3a5c,stroke:#4a9eff,color:#ffffff
+    style DASH_ROUTER fill:#0d2137,stroke:#4a9eff,color:#e0f0ff
+    style DASH_SERVICE fill:#0d2137,stroke:#4a9eff,color:#e0f0ff
+    style DASH_REPO fill:#0d2137,stroke:#4a9eff,color:#e0f0ff
+    style DASH_SCHEMA fill:#0d2137,stroke:#4a9eff,color:#e0f0ff
+    style DASH_DB_MODEL fill:#0d2137,stroke:#4a9eff,color:#e0f0ff
+    style CLIENT fill:#1a3d1a,stroke:#4aef4a,color:#ffffff
+    style FASTAPI fill:#2d1a3d,stroke:#9a4aef,color:#ffffff
+    style PG fill:#3d2a1a,stroke:#ef9a4a,color:#ffffff
+    style REDIS fill:#3d1a1a,stroke:#ef4a4a,color:#ffffff
+    style NGINX fill:#1a3d3d,stroke:#4aefef,color:#ffffff

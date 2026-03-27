@@ -1,0 +1,1 @@
+"""Report domain CRUD placeholder."""

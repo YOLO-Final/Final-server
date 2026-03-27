@@ -1,0 +1,2837 @@
+===== FILE: nginx/html/js/wed_dashboard/dashboard_api.js =====
+     1	/* [교체] KPI/상태/NG 스키마 정리 + fetchAll 반환 스키마 정리 */
+     2	
+     3	const MOCK_LINES = [
+     4	  { id: "A", produced: 4200, plan: 5000, defect_rate: 2.1, status: "RUN" },
+     5	  { id: "B", produced: 3950, plan: 5000, defect_rate: 3.8, status: "RUN" },
+     6	  { id: "C", produced: 2870, plan: 5000, defect_rate: 4.5, status: "DOWN" },
+     7	  { id: "D", produced: 2180, plan: 5000, defect_rate: 2.7, status: "IDLE" },
+     8	];
+     9	
+    10	const MOCK_DEFECTS = [
+    11	  { class_name: "short", count: 260, color: "#f87171" },
+    12	  { class_name: "open", count: 120, color: "#fb923c" },
+    13	  { class_name: "spur", count: 100, color: "#fbbf24" },
+    14	  { class_name: "mousebite", count: 70, color: "#a3e635" },
+    15	  { class_name: "spurious_copper", count: 50, color: "#22d3ee" },
+    16	  { class_name: "pin_hole", count: 40, color: "#34d399" },
+    17	];
+    18	
+    19	const MOCK_HOURLY = [
+    20	  { time: "08:00", produced: 1200, defect_rate: 2.1, predicted_defect: null },
+    21	  { time: "09:00", produced: 1380, defect_rate: 2.4, predicted_defect: null },
+    22	  { time: "10:00", produced: 1450, defect_rate: 1.9, predicted_defect: null },
+    23	  { time: "11:00", produced: 1310, defect_rate: 3.2, predicted_defect: null },
+    24	  { time: "12:00", produced: 890, defect_rate: 2.8, predicted_defect: null },
+    25	  { time: "13:00", produced: 1420, defect_rate: 2.5, predicted_defect: null },
+    26	  { time: "14:00", produced: 1550, defect_rate: 2.2, predicted_defect: null },
+    27	  { time: "15:00", produced: 1200, defect_rate: null, predicted_defect: 2.8 },
+    28	  { time: "16:00", produced: 0, defect_rate: null, predicted_defect: 3.1 },
+    29	  { time: "17:00", produced: 1000, defect_rate: null, predicted_defect: 3.0 },
+    30	];
+    31	
+    32	// 기존 키 유지 (time, board_id, cls, conf) -> 기존 유틸/화면 충돌 방지
+    33	const MOCK_NG_LIST = [
+    34	  { time: "14:59:21", board_id: "B-0021", cls: "short", conf: 0.97 },
+    35	  { time: "14:58:12", board_id: "A-0044", cls: "mousebite", conf: 0.88 },
+    36	  { time: "14:57:31", board_id: "C-0033", cls: "spur", conf: 0.85 },
+    37	  { time: "14:56:44", board_id: "B-0019", cls: "open", conf: 0.91 },
+    38	];
+    39	
+    40	const MOCK_SUMMARY = {
+    41	  total_produced: 13200,
+    42	  total_plan: 20000,
+    43	  achievement_rate: 66.0,
+    44	  inspection_qty: 8420,
+    45	  good_qty: 8065,
+    46	  defect_qty: 355,
+    47	  defect_rate: 4.2,
+    48	};
+    49	
+    50	const MOCK_KPI_CARDS = {
+    51	  worker: [
+    52	    {
+    53	      key: "ng_last_10min",
+    54	      title: "최근 10분 NG 발생",
+    55	      value: 26,
+    56	      unit: "건",
+    57	      helperText: "LINE B · short 집중",
+    58	      trendType: "up",
+    59	      trendValue: "+8",
+    60	      status: "danger",
+    61	      statusText: "급증",
+    62	    },
+    63	    {
+    64	      key: "achievement_rate",
+    65	      title: "목표 달성률",
+    66	      value: 66.0,
+    67	      unit: "%",
+    68	      helperText: "목표 20,000 pcs 기준",
+    69	      trendType: "flat",
+    70	      trendValue: "±0",
+    71	      status: "warning",
+    72	      statusText: "주의",
+    73	    },
+    74	    {
+    75	      key: "total_produced",
+    76	      title: "누적 생산량",
+    77	      value: 13200,
+    78	      unit: "pcs",
+    79	      helperText: "당일 누적",
+    80	      trendType: "up",
+    81	      trendValue: "+1,550",
+    82	      status: "normal",
+    83	      statusText: "정상",
+    84	    },
+    85	  ],
+    86	  qa: [
+    87	    {
+    88	      key: "defect_rate",
+    89	      title: "현재 불량률",
+    90	      value: 4.2,
+    91	      unit: "%",
+    92	      helperText: "검사 수량 기준",
+    93	      trendType: "down",
+    94	      trendValue: "-0.3",
+    95	      status: "warning",
+    96	      statusText: "주의",
+    97	    },
+    98	    {
+    99	      key: "inspection_summary",
+   100	      title: "검사 현황 요약",
+   101	      value: 8420,
+   102	      unit: "건",
+   103	      helperText: "양품 8,065 / 불량 355",
+   104	      trendType: "flat",
+   105	      trendValue: "±0",
+   106	      status: "normal",
+   107	      statusText: "정상",
+   108	    },
+   109	  ],
+   110	  manager: [
+   111	    {
+   112	      key: "factory_achievement_rate",
+   113	      title: "공장 목표 달성률",
+   114	      value: 66.0,
+   115	      unit: "%",
+   116	      helperText: "전 라인 합산",
+   117	      trendType: "flat",
+   118	      trendValue: "±0",
+   119	      status: "warning",
+   120	      statusText: "주의",
+   121	    },
+   122	  ],
+   123	  promo: [
+   124	    {
+   125	      key: "promo_total_produced",
+   126	      title: "누적 총 생산량",
+   127	      value: 13200,
+   128	      unit: "pcs",
+   129	      helperText: "오늘 기준",
+   130	      trendType: "up",
+   131	      trendValue: "+1,550",
+   132	      status: "normal",
+   133	      statusText: "정상",
+   134	    },
+   135	    {
+   136	      key: "promo_good_rate",
+   137	      title: "당일 양품률",
+   138	      value: 95.8,
+   139	      unit: "%",
+   140	      helperText: "검사 수량 기준",
+   141	      trendType: "up",
+   142	      trendValue: "+0.9",
+   143	      status: "normal",
+   144	      statusText: "개선",
+   145	    },
+   146	    {
+   147	      key: "promo_achievement_rate",
+   148	      title: "목표 달성률",
+   149	      value: 66.0,
+   150	      unit: "%",
+   151	      helperText: "목표 20,000 pcs",
+   152	      trendType: "flat",
+   153	      trendValue: "±0",
+   154	      status: "warning",
+   155	      statusText: "진행중",
+   156	    },
+   157	  ],
+   158	};
+   159	
+   160	const MOCK_STATUS = {
+   161	  worker: {
+   162	    equipment_status: [
+   163	      { line: "A", value: "RUN", label: "가동중" },
+   164	      { line: "B", value: "RUN", label: "가동중" },
+   165	      { line: "C", value: "DOWN", label: "정지" },
+   166	      { line: "D", value: "IDLE", label: "대기" },
+   167	    ],
+   168	  },
+   169	};
+   170	
+   171	async function fetchKpiCards() {
+   172	  return MOCK_KPI_CARDS;
+   173	}
+   174	
+   175	async function fetchStatusData() {
+   176	  return MOCK_STATUS;
+   177	}
+   178	
+   179	async function fetchAll() {
+   180	  return {
+   181	    summary: MOCK_SUMMARY,
+   182	    lines: MOCK_LINES,
+   183	    defects: MOCK_DEFECTS,
+   184	    hourly: MOCK_HOURLY,
+   185	    ngList: MOCK_NG_LIST,
+   186	    kpiCards: await fetchKpiCards(),
+   187	    statusData: await fetchStatusData(),
+   188	  };
+   189	}
+
+===== FILE: nginx/html/js/wed_dashboard/dashboard_app.js =====
+     1	/**
+     2	 * app.js — 메인 애플리케이션 로직
+     3	 * ──────────────────────────────────────────────────────────
+     4	 * 역할:
+     5	 *  1. 앱 시작 시 API에서 전체 데이터 로드
+     6	 *  2. 탭 전환 처리 (worker / qa / manager / promo)
+     7	 *  3. 각 화면 HTML 렌더링 + 차트 초기화
+     8	 *  4. 홍보 스크린: 실시간 시계 + TOP Defect 자동 롤링
+     9	 */
+    10	
+    11	// ── 탭 정의 (id, 레이블, 활성 색상) ─────────────────────
+    12	const TABS = [
+    13	  { id: "worker",  label: "작업자",    color: "#f87171" },
+    14	  { id: "qa",      label: "품질관리자", color: "#fbbf24" },
+    15	  { id: "manager", label: "관리자",    color: "#22d3a0" },
+    16	  { id: "promo",   label: "홍보",      color: "#22d3ee" },
+    17	];
+    18	
+    19	// 현재 활성 탭
+    20	let currentTab = "manager";
+    21	
+    22	// API 데이터 캐시 (탭 전환 시 재요청 없이 재사용)
+    23	let cache = null;
+    24	
+    25	// 홍보 스크린 타이머 ID (언마운트 시 클리어)
+    26	let promoTimers = [];
+    27	
+    28	// ── 상태별 색상 ──────────────────────────────────────────
+    29	const STATUS_COLOR = { RUN: "#22d3a0", IDLE: "#fbbf24", DOWN: "#f87171" };
+    30	const STATUS_BG    = { RUN: "#022c22", IDLE: "#2c1d00", DOWN: "#2d0000" };
+    31	
+    32	/** defects 배열에서 class_name으로 색상 조회 */
+    33	function defectColor(clsName, defects) {
+    34	  return defects.find(d => d.class_name === clsName)?.color ?? "#6b7fa3";
+    35	}
+    36	
+    37	// ── 유틸: HTML 이스케이프 (XSS 방지) ────────────────────
+    38	function esc(str) {
+    39	  return String(str)
+    40	    .replace(/&/g, "&amp;")
+    41	    .replace(/</g, "&lt;")
+    42	    .replace(/>/g, "&gt;");
+    43	}
+    44	
+    45	// ── 유틸: 숫자 포맷 ─────────────────────────────────────
+    46	const fmt = (n) => formatChartNumber(n);
+    47	const pct = (n, dec = 1) => {
+    48	  const txt = formatChartPercent(n, dec);
+    49	  return txt === "-" ? "-" : `${txt}%`;
+    50	};
+    51	
+    52	// ── 9.5.3.7 도넛차트 헬퍼 ───────────────────────────────
+    53	
+    54	/**
+    55	 * 도넛차트 범례 HTML 반환
+    56	 * @param {Array}  items  - [{ label, value, color }]
+    57	 * @param {number} total  - 전체 합계 (비율 표시용, 0이면 값만 표시)
+    58	 */
+    59	function donutLegendHTML(items, total) {
+    60	  return items.map((d) => {
+    61	    const pctVal = total ? (d.percentText ?? `${((Number(d.value) || 0) / total * 100).toFixed(1)}%`) : "";
+    62	    return `
+    63	      <div style="display:flex;align-items:center;gap:6px;margin-bottom:7px">
+    64	        <div style="width:8px;height:8px;border-radius:50%;background:${d.color};flex-shrink:0"></div>
+    65	        <span style="font-size:11px;color:#6b7fa3;flex:1">${esc(d.label)}</span>
+    66	        <span style="font-size:12px;color:${d.color};font-family:'DM Mono',monospace;font-weight:700">
+    67	          ${esc(pctVal || d.valueText || formatChartNumber(d.value))}
+    68	        </span>
+    69	      </div>`;
+    70	  }).join("");
+    71	}
+    72	
+    73	/** 라인 배열 → 상태별 도넛 데이터 변환 */
+    74	function buildStatusDistribution(lines) {
+    75	  const LABEL = { RUN: "가동중", IDLE: "대기", DOWN: "정지" };
+    76	  const COLOR  = { RUN: "#22d3a0", IDLE: "#fbbf24", DOWN: "#f87171" };
+    77	  const counts = {};
+    78	  (lines ?? []).forEach(l => { counts[l.status] = (counts[l.status] ?? 0) + 1; });
+    79	  return Object.entries(counts).map(([st, cnt]) => ({
+    80	    label: LABEL[st] ?? st,
+    81	    value: cnt,
+    82	    color: COLOR[st] ?? "#6b7fa3",
+    83	  }));
+    84	}
+    85	
+    86	// ════════════════════════════════════════════════════════
+    87	// 🖼️ HTML 렌더러
+    88	// ════════════════════════════════════════════════════════
+    89	
+    90	const KPI_STATUS_COLOR = { normal: "#22d3a0", warning: "#fbbf24", danger: "#f87171", neutral: "#6b7fa3" };
+    91	const KPI_STATUS_BG = { normal: "#022c22", warning: "#2c1d00", danger: "#2d0000", neutral: "#151f2e" };
+    92	const KPI_TREND_COLOR = { up: "#f87171", down: "#22d3a0", flat: "#6b7fa3" };
+    93	const KPI_TREND_ICON = { up: "▲", down: "▼", flat: "—" };
+    94	
+    95	// ════════════════════════════════════════════════════════
+    96	// 9.5.3.4 상태 배지 / 프로그레스 바
+    97	// ════════════════════════════════════════════════════════
+    98	
+    99	/**
+   100	 * 내부 상태값(value) → tone(normal/warning/danger/neutral) 반환
+   101	 * @param {string|number} value  - 상태값 또는 수치
+   102	 * @param {object} [opts]
+   103	 *   opts.thresholds  - [{max, tone}] 오름차순. 미지정 시 기본 규칙 사용
+   104	 *   opts.invert      - true: 낮을수록 danger (자재 잔량 등)
+   105	 */
+   106	function resolveTone(value, opts = {}) {
+   107	  // 문자열 상태값 매핑
+   108	  const STATUS_TONE = {
+   109	    RUN:    "normal",
+   110	    IDLE:   "warning",
+   111	    DOWN:   "danger",
+   112	    normal: "normal",
+   113	    warning:"warning",
+   114	    danger: "danger",
+   115	  };
+   116	  if (typeof value === "string") return STATUS_TONE[value] ?? "neutral";
+   117	
+   118	  // 수치 기반 임계치
+   119	  const num = Number(value);
+   120	  const thresholds = opts.thresholds ?? [
+   121	    { max: 39,  tone: opts.invert ? "normal"  : "danger"  },
+   122	    { max: 69,  tone: "warning" },
+   123	    { max: 100, tone: opts.invert ? "danger"  : "normal"  },
+   124	  ];
+   125	  for (const t of thresholds) {
+   126	    if (num <= t.max) return t.tone;
+   127	  }
+   128	  return opts.invert ? "danger" : "normal";
+   129	}
+   130	
+   131	/**
+   132	 * 상태 배지 HTML 반환 (재사용 가능)
+   133	 * @param {object} p
+   134	 *   p.value      - 내부 상태값 (예: "RUN", "normal", "danger")
+   135	 *   p.label      - 표시 텍스트 (예: "가동중", "정상", "위험")
+   136	 *   p.tone       - 직접 지정 시 value 해석 생략 ("normal"|"warning"|"danger"|"neutral")
+   137	 *   p.showDot    - 점 인디케이터 표시 여부 (기본 true)
+   138	 */
+   139	function statusBadgeHTML(p) {
+   140	  const tone = p.tone ?? resolveTone(p.value);
+   141	  const dot  = p.showDot !== false
+   142	    ? `<span class="status-badge-dot" aria-hidden="true"></span>`
+   143	    : "";
+   144	  return `<span class="status-badge status-badge--${tone}" role="status" aria-label="${esc(p.label)}">${dot}${esc(p.label)}</span>`;
+   145	}
+   146	
+   147	/** 로그 status -> tone/label 매핑 */
+   148	function resolveLogMeta(status) {
+   149	  const map = {
+   150	    NG:    { tone: "danger",  label: "불량" },
+   151	    ALARM: { tone: "danger",  label: "알람" },
+   152	    CHECK: { tone: "warning", label: "재검" },
+   153	    RUN:   { tone: "normal",  label: "가동" },
+   154	    IDLE:  { tone: "warning", label: "대기" },
+   155	    DOWN:  { tone: "danger",  label: "정지" },
+   156	  };
+   157	  return map[status] ?? { tone: "neutral", label: status ?? "중립" };
+   158	}
+   159	
+   160	/** rawTimestamp 우선 최신순 정렬 (fallback: time 문자열) */
+   161	function sortRecentLogs(logs = []) {
+   162	  const toMs = (r) => {
+   163	    const ts = new Date(r?.rawTimestamp).getTime();
+   164	    return Number.isFinite(ts) ? ts : Date.parse(`1970-01-01T${r?.time ?? "00:00:00"}+09:00`);
+   165	  };
+   166	  return [...logs].sort((a, b) => toMs(b) - toMs(a));
+   167	}
+   168	
+   169	function renderRecentLogList(logs = [], opts = {}) {
+   170	  const limit = opts.limit ?? 10;
+   171	  const rows = sortRecentLogs(logs).slice(0, limit);
+   172	
+   173	  if (!rows.length) {
+   174	    return `<div class="log-list-empty">집계 기간 내 로그 없음</div>`;
+   175	  }
+   176	
+   177	  const bodyRows = rows.map((r) => {
+   178	    const logMeta = resolveLogMeta(r.status);
+   179	    return `
+   180	      <div class="log-list-row">
+   181	        <span class="log-list-time">${esc(r.time ?? "-")}</span>
+   182	        <span class="log-list-line">${esc(r.line ?? "-")}</span>
+   183	        <span class="log-list-status">${statusBadgeHTML({ tone: logMeta.tone, label: logMeta.label })}</span>
+   184	        <span class="log-list-message" title="${esc(r.message ?? "")}">${esc(r.message ?? "-")}</span>
+   185	      </div>`;
+   186	  }).join("");
+   187	
+   188	  return `
+   189	    <div class="log-list">
+   190	      <div class="log-list-head">
+   191	        <span>시간</span>
+   192	        <span>라인</span>
+   193	        <span>상태</span>
+   194	        <span>메시지</span>
+   195	      </div>
+   196	      <div class="log-list-body">${bodyRows}</div>
+   197	    </div>`;
+   198	}
+   199	
+   200	function formatDateTimeDisplay(value) {
+   201	  return formatChartDateTime(value);
+   202	}
+   203	
+   204	function resolveDetailStatusMeta(value) {
+   205	  const map = {
+   206	    PASS:  { tone: "normal",  label: "양품" },
+   207	    OK:    { tone: "normal",  label: "정상" },
+   208	    RUN:   { tone: "normal",  label: "가동" },
+   209	    NG:    { tone: "danger",  label: "불량" },
+   210	    FAIL:  { tone: "danger",  label: "불량" },
+   211	    DOWN:  { tone: "danger",  label: "정지" },
+   212	    CHECK: { tone: "warning", label: "재검" },
+   213	    HOLD:  { tone: "warning", label: "보류" },
+   214	    IDLE:  { tone: "warning", label: "대기" },
+   215	  };
+   216	  return map[value] ?? { tone: "neutral", label: value ?? "-" };
+   217	}
+   218	
+   219	function compareDetailValues(a, b, type = "text", direction = "asc") {
+   220	  const dir = direction === "desc" ? -1 : 1;
+   221	
+   222	  if (type === "datetime") {
+   223	    const aTime = new Date(a).getTime();
+   224	    const bTime = new Date(b).getTime();
+   225	    const safeA = Number.isFinite(aTime) ? aTime : -Infinity;
+   226	    const safeB = Number.isFinite(bTime) ? bTime : -Infinity;
+   227	    return (safeA - safeB) * dir;
+   228	  }
+   229	
+   230	  if (type === "number" || type === "percent") {
+   231	    const safeA = Number.isFinite(Number(a)) ? Number(a) : -Infinity;
+   232	    const safeB = Number.isFinite(Number(b)) ? Number(b) : -Infinity;
+   233	    return (safeA - safeB) * dir;
+   234	  }
+   235	
+   236	  return String(a ?? "").localeCompare(String(b ?? ""), "ko-KR") * dir;
+   237	}
+   238	
+   239	function sortDetailRows(rows = [], sortBy = {}) {
+   240	  const { key, type = "text", direction = "asc" } = sortBy;
+   241	  if (!key) return [...rows];
+   242	
+   243	  return [...rows].sort((a, b) => compareDetailValues(a?.[key], b?.[key], type, direction));
+   244	}
+   245	
+   246	function formatDetailCell(row, column) {
+   247	  const raw = row?.[column.key];
+   248	
+   249	  if (column.type === "status") {
+   250	    const meta = resolveDetailStatusMeta(raw);
+   251	    return statusBadgeHTML({ tone: meta.tone, label: meta.label });
+   252	  }
+   253	
+   254	  if (raw === null || raw === undefined || raw === "") {
+   255	    return `<span class="detail-table-empty">-</span>`;
+   256	  }
+   257	
+   258	  if (column.type === "datetime") {
+   259	    const display = formatDateTimeDisplay(raw);
+   260	    return `<span class="detail-table-mono" title="${esc(display)}">${esc(display)}</span>`;
+   261	  }
+   262	
+   263	  if (column.type === "id") {
+   264	    return `<span class="detail-table-mono" title="${esc(String(raw))}">${esc(String(raw))}</span>`;
+   265	  }
+   266	
+   267	  if (column.type === "number") {
+   268	    return `<span class="detail-table-num">${fmt(raw)}</span>`;
+   269	  }
+   270	
+   271	  if (column.type === "percent") {
+   272	    return `<span class="detail-table-num">${pct(raw)}</span>`;
+   273	  }
+   274	
+   275	  const text = String(raw);
+   276	  return `<span class="detail-table-text" title="${esc(text)}">${esc(text)}</span>`;
+   277	}
+   278	
+   279	function renderDetailTable({ title, columns = [], rows = [], sortBy, emptyText = "상세 데이터 없음" }) {
+   280	  const sortedRows = sortDetailRows(rows, sortBy);
+   281	
+   282	  const headHTML = columns.map((column) => {
+   283	    const alignClass = column.align === "right" ? "detail-table-th--right" : "";
+   284	    return `<th class="${alignClass}">${esc(column.label)}</th>`;
+   285	  }).join("");
+   286	
+   287	  if (!sortedRows.length) {
+   288	    return `
+   289	      <div class="card">
+   290	        <div class="section-title">${esc(title)}</div>
+   291	        <div class="detail-table-empty-state">${esc(emptyText)}</div>
+   292	      </div>`;
+   293	  }
+   294	
+   295	  const bodyHTML = sortedRows.map((row) => {
+   296	    const cells = columns.map((column) => {
+   297	      const alignClass = column.align === "right" ? "detail-table-td--right" : "";
+   298	      const cellClass = column.type ? `detail-table-td--${column.type}` : "";
+   299	      return `<td class="${alignClass} ${cellClass}">${formatDetailCell(row, column)}</td>`;
+   300	    }).join("");
+   301	    return `<tr>${cells}</tr>`;
+   302	  }).join("");
+   303	
+   304	  return `
+   305	    <div class="card">
+   306	      <div class="section-title">${esc(title)}</div>
+   307	      <div class="detail-table-wrap">
+   308	        <table class="detail-table">
+   309	          <thead>
+   310	            <tr>${headHTML}</tr>
+   311	          </thead>
+   312	          <tbody>${bodyHTML}</tbody>
+   313	        </table>
+   314	      </div>
+   315	    </div>`;
+   316	}
+   317	
+   318	/**
+   319	 * 프로그레스 바 블록 HTML 반환 (재사용 가능)
+   320	 * @param {object} p
+   321	 *   p.label         - 항목 라벨
+   322	 *   p.value         - 현재 값 (숫자)
+   323	 *   p.max           - 최대 값 (기본 100)
+   324	 *   p.unit          - 단위 (기본 "%")
+   325	 *   p.helperText    - 보조 텍스트
+   326	 *   p.tone          - 직접 tone 지정 시 임계치 계산 생략
+   327	 *   p.invert        - true: 낮을수록 danger
+   328	 *   p.thresholds    - 사용자 정의 임계치 배열
+   329	 */
+   330	function progressBarHTML(p) {
+   331	  const max    = p.max  ?? 100;
+   332	  const unit   = p.unit ?? "%";
+   333	  const pct    = Math.min(Math.max((p.value / max) * 100, 0), 100).toFixed(1);
+   334	  const tone   = p.tone ?? resolveTone(p.value, {
+   335	    invert:     p.invert,
+   336	    thresholds: p.thresholds,
+   337	  });
+   338	  const displayVal = typeof p.value === "number"
+   339	    ? (Number.isInteger(p.value) ? p.value : p.value.toFixed(1))
+   340	    : p.value;
+   341	  const helperHTML = p.helperText
+   342	    ? `<div class="progress-block-helper">${esc(p.helperText)}</div>`
+   343	    : "";
+   344	
+   345	  // 색상 강조: 값 색상도 tone 연동
+   346	  const valColor = KPI_STATUS_COLOR[tone] ?? KPI_STATUS_COLOR.neutral;
+   347	
+   348	  return `
+   349	    <div class="progress-block">
+   350	      <div class="progress-block-header">
+   351	        <span class="progress-block-label">${esc(p.label)}</span>
+   352	        <span class="progress-block-value" style="color:${valColor}">${esc(displayVal)}${esc(unit)}</span>
+   353	      </div>
+   354	      <div class="progress-block-track" role="progressbar"
+   355	           aria-valuenow="${p.value}" aria-valuemin="0" aria-valuemax="${max}"
+   356	           aria-label="${esc(p.label)} ${esc(displayVal)}${esc(unit)}">
+   357	        <div class="progress-block-fill progress-block-fill--${tone}" style="width:${pct}%"></div>
+   358	      </div>
+   359	      ${helperHTML}
+   360	    </div>`;
+   361	}
+   362	
+   363	function kpiCardHTML(p) {
+   364	  const title = p.title ?? p.label ?? "";
+   365	  const statusKey = p.status ?? "neutral";
+   366	  const accentClr = p.accent ?? KPI_STATUS_COLOR[statusKey];
+   367	  const subText = p.helperText ?? p.sub ?? "";
+   368	
+   369	  let displayValue = p.value;
+   370	  if (typeof p.value === "number") {
+   371	    displayValue = Number.isInteger(p.value)
+   372	      ? p.value.toLocaleString("ko-KR")
+   373	      : p.value.toFixed(1);
+   374	  }
+   375	
+   376	  const statusBadge = p.statusText ? `
+   377	    <span class="kpi-status-badge"
+   378	          style="color:${KPI_STATUS_COLOR[statusKey]}; background:${KPI_STATUS_BG[statusKey]}; border:1px solid ${KPI_STATUS_COLOR[statusKey]}44">
+   379	      ${esc(p.statusText)}
+   380	    </span>` : "";
+   381	
+   382	  const trendKey = p.trendType ?? "flat";
+   383	  const trendHTML = p.trendValue ? `
+   384	    <span class="kpi-trend" style="color:${KPI_TREND_COLOR[trendKey]}">
+   385	      ${KPI_TREND_ICON[trendKey]} ${esc(p.trendValue)}
+   386	    </span>` : "";
+   387	
+   388	  const unitHTML = p.unit ? `<span class="kpi-unit">${esc(p.unit)}</span>` : "";
+   389	
+   390	  return `
+   391	    <div class="kpi-card" data-kpi="${esc(p.key ?? "")}"
+   392	         style="border:1px solid ${accentClr}33; box-shadow:0 0 20px ${accentClr}14;">
+   393	      <div class="kpi-card-header">
+   394	        <div class="kpi-label">${esc(title)}</div>
+   395	        ${statusBadge}
+   396	      </div>
+   397	      <div class="kpi-value-row">
+   398	        <span class="kpi-value" style="color:${accentClr}">${esc(displayValue)}</span>
+   399	        ${unitHTML}
+   400	      </div>
+   401	      <div class="kpi-card-footer">
+   402	        <div class="kpi-sub">${esc(subText)}</div>
+   403	        ${trendHTML}
+   404	      </div>
+   405	    </div>`;
+   406	}
+   407	
+   408	function renderKpiCards(kpiCards, cols = 4) {
+   409	  return `
+   410	    <div class="grid grid-${cols}" style="gap:10px">
+   411	      ${kpiCards.map(kpiCardHTML).join("")}
+   412	    </div>`;
+   413	}
+   414	
+   415	/* [추가] QA NG 리스트 컬럼 (공통 detail table 재사용) */
+   416	const QA_NG_LIST_COLUMNS = [
+   417	  { key: "detectedAt", label: "검출시각", type: "datetime" },
+   418	  { key: "lineName", label: "라인명", type: "text" },
+   419	  { key: "boardId", label: "보드 ID", type: "id" },
+   420	  { key: "defectType", label: "불량유형", type: "text" },
+   421	  { key: "confidencePct", label: "신뢰도", type: "percent", align: "right" },
+   422	  { key: "judgment", label: "판정", type: "status" },
+   423	];
+   424	
+   425	/* [추가] NG 원본(time/board_id/cls/conf) -> QA 테이블 row */
+   426	function toQaNgRows(ngList = []) {
+   427	  return (ngList ?? []).map((r) => ({
+   428	    detectedAt: `2026-03-14T${String(r.time ?? "00:00:00")}+09:00`,
+   429	    lineName: `LINE ${String(r.board_id ?? "-").split("-")[0]}`,
+   430	    boardId: r.board_id ?? "-",
+   431	    defectType: r.cls ?? "-",
+   432	    confidencePct: Number.isFinite(Number(r.conf)) ? Number(r.conf) * 100 : null,
+   433	    judgment: "NG",
+   434	  }));
+   435	}
+   436	
+   437	/* [교체] renderWorker */
+   438	function renderWorker({ lines = [], defects = [], ngList = [], kpis = [], statusData = null }) {
+   439	  const statusKo = { RUN: "가동중", IDLE: "대기", DOWN: "정지" };
+   440	
+   441	  const statusRows = statusData?.worker?.equipment_status?.length
+   442	    ? statusData.worker.equipment_status
+   443	    : (lines ?? []).map((l) => ({ line: l.id, value: l.status, label: statusKo[l.status] ?? l.status ?? "알 수 없음" }));
+   444	
+   445	  const equipmentBadges = statusRows.length
+   446	    ? statusRows.map((s) => statusBadgeHTML({ value: s.value, label: `L${s.line} ${s.label}` })).join("")
+   447	    : `<div class="list-empty">데이터 없음</div>`;
+   448	
+   449	  const ngRows = (ngList ?? []).slice(0, 7).map((r) => {
+   450	    const clsColor = defectColor(r.cls, defects);
+   451	    const lineId = (r.board_id ?? "-").split("-")[0];
+   452	    const confPct = Number.isFinite(Number(r.conf)) ? Math.floor(Number(r.conf) * 100) : "-";
+   453	    return `
+   454	      <div class="ng-row">
+   455	        <span class="ng-time">${esc(r.time ?? "-")}</span>
+   456	        <span class="ng-line">LINE ${esc(lineId)}</span>
+   457	        <span class="ng-badge" style="background:${clsColor}22; color:${clsColor}; border:1px solid ${clsColor}44">${esc(r.cls ?? "-")}</span>
+   458	        <span class="ng-conf">${esc(String(confPct))}${confPct === "-" ? "" : "%"}</span>
+   459	        <span class="ng-tag">NG</span>
+   460	      </div>`;
+   461	  }).join("");
+   462	
+   463	  return `
+   464	    <div class="screen">
+   465	      <div class="grid grid-3" style="gap:10px">
+   466	        ${kpis.length ? renderKpiCards(kpis, 3) : `<div class="list-empty">KPI 데이터 없음</div>`}
+   467	      </div>
+   468	
+   469	      <div class="card">
+   470	        <div class="section-title">설비 가동 상태</div>
+   471	        <div class="equipment-status-group">${equipmentBadges}</div>
+   472	      </div>
+   473	
+   474	      <div class="card">
+   475	        <div class="section-title">최근 발생 유형 Top 3</div>
+   476	        <div class="chart-wrap" style="height:170px">
+   477	          <canvas id="workerTopDefectBarChart"></canvas>
+   478	        </div>
+   479	      </div>
+   480	
+   481	      <div class="card">
+   482	        <div class="section-title">실시간 NG 로그</div>
+   483	        ${ngRows || `<div class="list-empty">집계 기간 내 데이터 없음</div>`}
+   484	      </div>
+   485	    </div>`;
+   486	}
+   487	
+   488	/* [교체] renderQA */
+   489	function renderQA({ defects = [], hourly = [], ngList = [], kpis = [] }) {
+   490	  const qaNgRows = toQaNgRows(ngList);
+   491	  const qaNgTableHTML = renderDetailTable({
+   492	    title: "NG 검출 리스트",
+   493	    columns: QA_NG_LIST_COLUMNS,
+   494	    rows: qaNgRows,
+   495	    sortBy: { key: "detectedAt", type: "datetime", direction: "desc" },
+   496	    emptyText: "NG 검출 데이터 없음",
+   497	  });
+   498	
+   499	  return `
+   500	    <div class="screen">
+   501	      <div class="grid grid-2" style="gap:10px">
+   502	        ${kpis.length ? renderKpiCards(kpis, 2) : `<div class="list-empty">KPI 데이터 없음</div>`}
+   503	      </div>
+   504	
+   505	      <div class="grid grid-chart">
+   506	        <div class="card">
+   507	          <div class="section-title">시간대별 불량률 추이</div>
+   508	          <div class="chart-wrap" style="height:210px"><canvas id="qaLineChart"></canvas></div>
+   509	        </div>
+   510	        <div class="card">
+   511	          <div class="section-title">주요 불량 유형 Top 5</div>
+   512	          <div class="chart-wrap" style="height:210px"><canvas id="qaBarChart"></canvas></div>
+   513	        </div>
+   514	      </div>
+   515	
+   516	      ${qaNgTableHTML}
+   517	    </div>`;
+   518	}
+   519	
+   520	/* [교체] renderManager */
+   521	function renderManager({ lines = [], hourly = [], kpis = [] }) {
+   522	  return `
+   523	    <div class="screen">
+   524	      <div class="grid grid-1" style="gap:10px">
+   525	        ${kpis.length ? renderKpiCards(kpis, 1) : `<div class="list-empty">KPI 데이터 없음</div>`}
+   526	      </div>
+   527	
+   528	      <div class="grid grid-chart">
+   529	        <div class="card">
+   530	          <div class="section-title">시간대별 생산량 / 불량률 추이</div>
+   531	          <div class="chart-wrap" style="height:230px"><canvas id="managerHourlyChart"></canvas></div>
+   532	        </div>
+   533	        <div class="card">
+   534	          <div class="section-title">라인별 생산량 비교</div>
+   535	          <div class="chart-wrap" style="height:230px"><canvas id="managerLineBarChart"></canvas></div>
+   536	        </div>
+   537	      </div>
+   538	    </div>`;
+   539	}
+   540	
+   541	/* [교체] renderPromo */
+   542	function renderPromo({ defects = [], hourly = [], kpis = [] }) {
+   543	  const top3 = [...(defects ?? [])].sort((a, b) => (b.count ?? 0) - (a.count ?? 0)).slice(0, 3);
+   544	  const topDefectRows = top3.length
+   545	    ? top3.map((d, i) => `
+   546	      <div class="promo-top-item">
+   547	        <span>#${i + 1} ${esc(d.class_name ?? "-")}</span>
+   548	        <strong>${formatChartNumber(d.count ?? 0)}건</strong>
+   549	      </div>`).join("")
+   550	    : `<div class="list-empty">집계 기간 내 데이터 없음</div>`;
+   551	
+   552	  return `
+   553	    <div class="promo-screen">
+   554	      <div class="promo-header">
+   555	        <div class="promo-subtitle">Smart Factory PCB</div>
+   556	        <h2 class="promo-title">오늘의 생산 현황</h2>
+   557	        <div class="promo-clock" id="promoClock">00:00:00</div>
+   558	      </div>
+   559	
+   560	      <div class="grid grid-3" style="gap:10px">
+   561	        ${kpis.length ? renderKpiCards(kpis, 3) : `<div class="list-empty">KPI 데이터 없음</div>`}
+   562	      </div>
+   563	
+   564	      <div class="grid" style="grid-template-columns:1fr 1fr; gap:16px; margin-top:16px">
+   565	        <div class="card">
+   566	          <div class="section-title">TOP 3 Defect Class</div>
+   567	          ${topDefectRows}
+   568	        </div>
+   569	        <div class="card">
+   570	          <div class="section-title">시간대별 생산 추이</div>
+   571	          <div class="chart-wrap" style="height:160px"><canvas id="promoLineChart"></canvas></div>
+   572	        </div>
+   573	      </div>
+   574	    </div>`;
+   575	}
+   576	
+   577	/* [교체] startPromoTimers -> 시계만 유지 */
+   578	function startPromoClockOnly() {
+   579	  promoTimers.forEach(clearInterval);
+   580	  promoTimers = [];
+   581	  const updateClock = () => {
+   582	    const el = document.getElementById("promoClock");
+   583	    if (el) el.textContent = new Date().toLocaleTimeString("ko-KR");
+   584	  };
+   585	  updateClock();
+   586	  promoTimers.push(setInterval(updateClock, 1000));
+   587	}
+   588	
+   589	/* [교체] activateTab */
+   590	function activateTab(tabId) {
+   591	  if (currentTab === "promo") {
+   592	    promoTimers.forEach(clearInterval);
+   593	    promoTimers = [];
+   594	  }
+   595	
+   596	  currentTab = tabId;
+   597	
+   598	  document.querySelectorAll(".tab-btn").forEach((btn) => {
+   599	    const isActive = btn.dataset.tab === tabId;
+   600	    btn.classList.toggle("active", isActive);
+   601	    if (isActive) {
+   602	      const tabDef = TABS.find((t) => t.id === tabId);
+   603	      btn.style.setProperty("--tab-color", tabDef?.color ?? "#22d3a0");
+   604	    }
+   605	  });
+   606	
+   607	  const {
+   608	    summary,
+   609	    lines,
+   610	    defects,
+   611	    hourly,
+   612	    ngList,
+   613	    kpiCards,
+   614	    statusData,
+   615	  } = cache;
+   616	
+   617	  const content = document.getElementById("content");
+   618	
+   619	  switch (tabId) {
+   620	    case "worker":
+   621	      content.innerHTML = renderWorker({
+   622	        lines,
+   623	        defects,
+   624	        ngList,
+   625	        kpis: kpiCards?.worker ?? [],
+   626	        statusData,
+   627	      });
+   628	      break;
+   629	    case "qa":
+   630	      content.innerHTML = renderQA({
+   631	        defects,
+   632	        hourly,
+   633	        ngList,
+   634	        kpis: kpiCards?.qa ?? [],
+   635	      });
+   636	      break;
+   637	    case "manager":
+   638	      content.innerHTML = renderManager({
+   639	        lines,
+   640	        hourly,
+   641	        kpis: kpiCards?.manager ?? [],
+   642	      });
+   643	      break;
+   644	    case "promo":
+   645	      content.innerHTML = renderPromo({
+   646	        defects,
+   647	        hourly,
+   648	        kpis: kpiCards?.promo ?? [],
+   649	      });
+   650	      break;
+   651	    default:
+   652	      content.innerHTML = `<div class="list-empty">탭 데이터 없음</div>`;
+   653	  }
+   654	
+   655	  requestAnimationFrame(() => {
+   656	    switch (tabId) {
+   657	      case "worker":
+   658	        renderWorkerTopDefectBarChart("workerTopDefectBarChart", defects);
+   659	        break;
+   660	      case "qa":
+   661	        renderDefectRateChart("qaLineChart", hourly);
+   662	        renderDefectBarChart("qaBarChart", defects);
+   663	        break;
+   664	      case "manager":
+   665	        renderHourlyChart("managerHourlyChart", hourly);
+   666	        renderLineOutputChart("managerLineBarChart", lines);
+   667	        break;
+   668	      case "promo":
+   669	        renderPromoLineChart("promoLineChart", hourly);
+   670	        startPromoClockOnly();
+   671	        break;
+   672	      default:
+   673	        break;
+   674	    }
+   675	  });
+   676	}
+   677	
+   678	/**
+   679	 * 앱 초기화 — DOM 로드 후 실행
+   680	 * 1. API에서 전체 데이터 로드
+   681	 * 2. 탭 이벤트 리스너 등록
+   682	 * 3. 기본 탭(관리자) 활성화
+   683	 */
+   684	async function initApp() {
+   685	  try {
+   686	    // 모든 API 병렬 호출 (fetchAll: api.js)
+   687	    cache = await fetchAll();
+   688	
+   689	    // 탭 버튼 클릭 이벤트 등록
+   690	    document.querySelectorAll(".tab-btn").forEach(btn => {
+   691	      btn.addEventListener("click", () => activateTab(btn.dataset.tab));
+   692	    });
+   693	
+   694	    // 기본 탭 활성화
+   695	    activateTab("manager");
+   696	
+   697	  } catch (err) {
+   698	    // API 오류 시 에러 메시지 표시
+   699	    document.getElementById("content").innerHTML = `
+   700	      <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; height:60vh; color:#f87171; gap:12px">
+   701	        <div style="font-size:32px">⚠</div>
+   702	        <div>API 연결 실패: ${esc(err.message)}</div>
+   703	        <div style="font-size:12px; color:#4a5d7a">FastAPI 서버가 실행 중인지 확인하세요</div>
+   704	        <code style="font-size:11px; color:#6b7fa3">uvicorn backend.main:app --reload</code>
+   705	      </div>`;
+   706	  }
+   707	}
+   708	
+   709	// DOM 준비 완료 후 앱 초기화 실행
+   710	document.addEventListener("DOMContentLoaded", initApp);
+
+===== FILE: nginx/html/css/wed_dashboard/dashboard_style.css =====
+     1	/*
+     2	 * style.css — PCB Dashboard 전체 스타일
+     3	 * ──────────────────────────────────────────────────────────
+     4	 * 디자인 토큰은 :root CSS 변수로 관리 → 한 곳만 수정하면 전체 반영
+     5	 * 반응형: Mobile(<768) / Tablet(768~1024) / Desktop(>1024)
+     6	 */
+     7	
+     8	/* ── CSS 변수 (디자인 토큰) ─────────────────────────────── */
+     9	:root {
+    10	  --bg-app:    #080e18;
+    11	  --bg-card:   #0c1520;
+    12	  --bg-deep:   #0a111c;
+    13	  --bg-bar:    #1e2d40;
+    14	  --border:    #1a2840;
+    15	  --border-md: #1e2d40;
+    16	
+    17	  --text-label: #4a5d7a;
+    18	  --text-muted: #6b7fa3;
+    19	  --text-body:  #a0b4cc;
+    20	  --text-main:  #e2ecff;
+    21	
+    22	  --blue:   #4a9eff;
+    23	  --cyan:   #22d3ee;
+    24	  --green:  #22d3a0;
+    25	  --yellow: #fbbf24;
+    26	  --red:    #f87171;
+    27	  --orange: #fb923c;
+    28	  --purple: #a78bfa;
+    29	  --lime:   #a3e635;
+    30	
+    31	  --font-mono: 'DM Mono', monospace;
+    32	  --font-sans: 'DM Sans', sans-serif;
+    33	  --font-orb:  'Orbitron', monospace;
+    34	
+    35	  --radius-card:  14px;
+    36	  --radius-inner: 10px;
+    37	}
+    38	
+    39	/* ── 리셋 & 기본 ────────────────────────────────────────── */
+    40	*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    41	
+    42	body {
+    43	  background: var(--bg-app);
+    44	  color: var(--text-main);
+    45	  font-family: var(--font-sans);
+    46	  min-height: 100vh;
+    47	  -webkit-tap-highlight-color: transparent; /* 모바일 탭 하이라이트 제거 */
+    48	}
+    49	
+    50	::-webkit-scrollbar { width: 4px; height: 4px; }
+    51	::-webkit-scrollbar-track { background: var(--bg-app); }
+    52	::-webkit-scrollbar-thumb { background: var(--border-md); border-radius: 4px; }
+    53	
+    54	/* ── 탭 바 ──────────────────────────────────────────────── */
+    55	#tab-bar {
+    56	  display: flex;
+    57	  align-items: stretch;
+    58	  background: var(--bg-deep);
+    59	  border-bottom: 1px solid var(--border-md);
+    60	  position: sticky;
+    61	  top: 0;
+    62	  z-index: 100;
+    63	  height: 50px;
+    64	}
+    65	
+    66	#brand {
+    67	  display: flex;
+    68	  align-items: center;
+    69	  padding: 0 16px;
+    70	  border-right: 1px solid var(--border-md);
+    71	  margin-right: 4px;
+    72	  font-size: 11px;
+    73	  font-weight: 700;
+    74	  color: var(--text-label);
+    75	  letter-spacing: 1px;
+    76	  white-space: nowrap;
+    77	}
+    78	
+    79	/* 탭 버튼 공통 */
+    80	.tab-btn {
+    81	  flex: none;
+    82	  background: none;
+    83	  border: none;
+    84	  cursor: pointer;
+    85	  padding: 0 18px;
+    86	  min-width: 100px;
+    87	  font-size: 13px;
+    88	  font-weight: 600;
+    89	  color: var(--text-label);
+    90	  border-bottom: 2px solid transparent;
+    91	  display: flex;
+    92	  flex-direction: column;
+    93	  align-items: center;
+    94	  justify-content: center;
+    95	  gap: 2px;
+    96	  transition: color 0.2s, border-color 0.2s;
+    97	}
+    98	
+    99	/* 활성 탭 색상은 JS에서 --tab-color 변수를 동적으로 주입 */
+   100	.tab-btn.active { color: var(--tab-color, var(--green)); border-bottom-color: var(--tab-color, var(--green)); }
+   101	
+   102	.tab-emoji { font-size: 16px; }
+   103	.tab-label { font-size: 11px; }
+   104	
+   105	/* LIVE 인디케이터 */
+   106	#live-indicator {
+   107	  margin-left: auto;
+   108	  display: flex;
+   109	  align-items: center;
+   110	  gap: 5px;
+   111	  padding: 0 14px;
+   112	}
+   113	#live-dot {
+   114	  width: 6px; height: 6px;
+   115	  border-radius: 50%;
+   116	  background: var(--green);
+   117	  box-shadow: 0 0 6px var(--green);
+   118	  animation: pulse 2s infinite;
+   119	}
+   120	#live-text { color: var(--green); font-size: 11px; letter-spacing: 1px; }
+   121	
+   122	@keyframes pulse {
+   123	  0%, 100% { opacity: 1; }
+   124	  50%       { opacity: 0.4; }
+   125	}
+   126	
+   127	/* ── 콘텐츠 영역 ────────────────────────────────────────── */
+   128	#content { overflow-x: hidden; }
+   129	
+   130	/* ── 로딩 ────────────────────────────────────────────────── */
+   131	#loading {
+   132	  display: flex;
+   133	  flex-direction: column;
+   134	  align-items: center;
+   135	  justify-content: center;
+   136	  height: 60vh;
+   137	  color: var(--text-label);
+   138	  gap: 16px;
+   139	}
+   140	.spinner {
+   141	  width: 40px; height: 40px;
+   142	  border: 3px solid var(--border-md);
+   143	  border-top-color: var(--green);
+   144	  border-radius: 50%;
+   145	  animation: spin 0.8s linear infinite;
+   146	}
+   147	@keyframes spin { to { transform: rotate(360deg); } }
+   148	
+   149	/* ── 공통 레이아웃 ──────────────────────────────────────── */
+   150	.screen { padding: 20px; display: flex; flex-direction: column; gap: 14px; }
+   151	
+   152	/* 그리드 헬퍼 */
+   153	.grid { display: grid; gap: 10px; }
+   154	.grid-2 { grid-template-columns: repeat(2, 1fr); }
+   155	.grid-3 { grid-template-columns: repeat(3, 1fr); }
+   156	.grid-4 { grid-template-columns: repeat(4, 1fr); }
+   157	.grid-5 { grid-template-columns: repeat(5, 1fr); }
+   158	.grid-6 { grid-template-columns: repeat(6, 1fr); }
+   159	.grid-chart { grid-template-columns: 1.4fr 1fr; gap: 14px; }
+   160	
+   161	/* ── 카드 ──────────────────────────────────────────────── */
+   162	.card {
+   163	  background: var(--bg-card);
+   164	  border: 1px solid var(--border);
+   165	  border-radius: var(--radius-card);
+   166	  padding: 16px;
+   167	}
+   168	
+   169	/* 섹션 제목 (소형 대문자) */
+   170	.section-title {
+   171	  color: var(--text-label);
+   172	  font-size: 10px;
+   173	  letter-spacing: 2px;
+   174	  text-transform: uppercase;
+   175	  margin-bottom: 14px;
+   176	  font-family: var(--font-sans);
+   177	}
+   178	
+   179	/* ── KPI 카드 ──────────────────────────────────────────── */
+   180	.kpi-card {
+   181	  background: linear-gradient(135deg, #0f1923 60%, #131f2e);
+   182	  border-radius: var(--radius-card);
+   183	  padding: 16px 20px;
+   184	  min-height: 90px;
+   185	  display: flex;
+   186	  flex-direction: column;
+   187	  justify-content: space-between;
+   188	}
+   189	.kpi-label {
+   190	  font-size: 10px;
+   191	  letter-spacing: 1.5px;
+   192	  text-transform: uppercase;
+   193	  color: var(--text-label);
+   194	  font-family: var(--font-sans);
+   195	}
+   196	.kpi-value {
+   197	  font-size: 26px;
+   198	  font-weight: 700;
+   199	  font-family: var(--font-mono);
+   200	  line-height: 1;
+   201	  margin: 6px 0;
+   202	}
+   203	.kpi-sub { font-size: 11px; color: var(--text-label); }
+   204	
+   205	/* ── 경고 배너 ──────────────────────────────────────────── */
+   206	.alert-banner {
+   207	  background: linear-gradient(90deg, #2d0a00, #3d1500);
+   208	  border: 1px solid var(--red);
+   209	  border-radius: var(--radius-inner);
+   210	  padding: 10px 16px;
+   211	  display: flex;
+   212	  align-items: flex-start;
+   213	  gap: 10px;
+   214	  box-shadow: 0 0 20px #f8717144;
+   215	}
+   216	.alert-icon { font-size: 20px; flex-shrink: 0; }
+   217	.alert-title { color: #fca5a5; font-size: 13px; font-weight: 700; }
+   218	.alert-msg   { color: var(--red); font-size: 12px; margin-top: 2px; }
+   219	.alert-time  { color: var(--red); font-size: 11px; flex-shrink: 0; margin-left: auto; }
+   220	
+   221	/* ── Defect 바 리스트 ───────────────────────────────────── */
+   222	.defect-bar-row {
+   223	  display: flex;
+   224	  align-items: center;
+   225	  gap: 8px;
+   226	  margin-bottom: 9px;
+   227	}
+   228	.defect-bar-label { width: 105px; font-size: 11px; color: var(--text-muted); text-align: right; flex-shrink: 0; }
+   229	.defect-bar-track { flex: 1; height: 18px; background: var(--bg-bar); border-radius: 4px; overflow: hidden; }
+   230	.defect-bar-fill  { height: 100%; border-radius: 4px; transition: width 1.2s ease; }
+   231	.defect-bar-count { width: 28px; font-size: 13px; font-weight: 700; text-align: right; flex-shrink: 0; }
+   232	
+   233	/* ── NG 로그 리스트 ─────────────────────────────────────── */
+   234	.ng-row {
+   235	  display: flex;
+   236	  align-items: center;
+   237	  gap: 10px;
+   238	  padding: 9px 0;
+   239	  border-bottom: 1px solid var(--border);
+   240	}
+   241	.ng-time  { font-size: 11px; color: var(--text-label); font-family: var(--font-mono); flex-shrink: 0; }
+   242	.ng-line  { font-size: 11px; color: #506070; flex-shrink: 0; }
+   243	.ng-badge {
+   244	  border-radius: 5px;
+   245	  padding: 1px 8px;
+   246	  font-size: 11px;
+   247	  font-family: var(--font-mono);
+   248	  flex: 1;
+   249	}
+   250	.ng-conf  { font-size: 11px; color: var(--text-label); flex-shrink: 0; }
+   251	.ng-tag   { font-size: 11px; font-weight: 700; color: var(--red); flex-shrink: 0; }
+   252	
+   253	/* ── 최근 이벤트/알람 로그 리스트 (9.5.3.8) ─────────────── */
+   254	.log-list-head,
+   255	.log-list-row {
+   256	  display: grid;
+   257	  grid-template-columns: 84px 74px 92px minmax(0, 1fr);
+   258	  gap: 10px;
+   259	  align-items: center;
+   260	}
+   261	
+   262	.log-list-head {
+   263	  padding: 0 0 8px;
+   264	  border-bottom: 1px solid var(--border-md);
+   265	  color: var(--text-label);
+   266	  font-size: 11px;
+   267	  font-weight: 600;
+   268	}
+   269	
+   270	.log-list-body {
+   271	  max-height: 260px;
+   272	  overflow-y: auto;
+   273	}
+   274	
+   275	.log-list-row {
+   276	  padding: 10px 0;
+   277	  border-bottom: 1px solid #1a2535;
+   278	}
+   279	
+   280	.log-list-time,
+   281	.log-list-line {
+   282	  font-size: 11px;
+   283	  color: var(--text-label);
+   284	  font-family: var(--font-mono);
+   285	}
+   286	
+   287	.log-list-status .status-badge {
+   288	  padding: 2px 8px;
+   289	}
+   290	
+   291	.log-list-message {
+   292	  min-width: 0;
+   293	  color: var(--text-body);
+   294	  font-size: 12px;
+   295	  overflow: hidden;
+   296	  text-overflow: ellipsis;
+   297	  white-space: nowrap;
+   298	}
+   299	
+   300	.log-list-empty {
+   301	  padding: 10px 0;
+   302	  color: var(--text-label);
+   303	  font-size: 12px;
+   304	}
+   305	
+   306	/* ── 라인 현황 카드 ─────────────────────────────────────── */
+   307	.line-card {
+   308	  background: var(--bg-deep);
+   309	  border: 1px solid var(--border);
+   310	  border-radius: var(--radius-inner);
+   311	  padding: 11px 13px;
+   312	  margin-bottom: 10px;
+   313	}
+   314	.line-badge {
+   315	  width: 40px; height: 40px;
+   316	  border-radius: 8px;
+   317	  display: flex; align-items: center; justify-content: center;
+   318	  font-weight: 800; font-size: 13px;
+   319	  font-family: var(--font-mono);
+   320	  flex-shrink: 0;
+   321	}
+   322	.line-info { flex: 1; min-width: 0; }
+   323	.line-produced { font-size: 14px; font-weight: 700; font-family: var(--font-mono); color: #c0d0e8; }
+   324	.line-produced small { font-size: 11px; color: var(--text-label); }
+   325	.line-status-badge { border-radius: 5px; padding: 2px 9px; font-size: 11px; font-weight: 700; }
+   326	.progress-track { flex: 1; height: 5px; background: var(--bg-bar); border-radius: 4px; overflow: hidden; }
+   327	.progress-fill  { height: 100%; border-radius: 4px; transition: width 1s ease; }
+   328	
+   329	/* ── 리스크 게이지 ──────────────────────────────────────── */
+   330	.risk-gauge-wrap {
+   331	  background: var(--bg-deep);
+   332	  border-radius: 12px;
+   333	  padding: 14px;
+   334	  text-align: center;
+   335	}
+   336	.risk-label { color: var(--text-label); font-size: 10px; margin-bottom: 10px; font-family: var(--font-sans); }
+   337	.risk-donut {
+   338	  border-radius: 50%;
+   339	  margin: 0 auto 10px;
+   340	  display: flex; align-items: center; justify-content: center;
+   341	}
+   342	.risk-inner {
+   343	  border-radius: 50%;
+   344	  background: var(--bg-deep);
+   345	  display: flex; align-items: center; justify-content: center;
+   346	}
+   347	.risk-pct { font-size: 13px; font-weight: 700; font-family: var(--font-mono); }
+   348	.risk-count { font-size: 12px; color: var(--text-muted); }
+   349	
+   350	/* ── NG 테이블 ──────────────────────────────────────────── */
+   351	.ng-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+   352	.ng-table th {
+   353	  color: var(--text-label);
+   354	  text-align: left;
+   355	  padding: 6px 10px;
+   356	  border-bottom: 1px solid var(--border-md);
+   357	  font-weight: 600;
+   358	  font-size: 11px;
+   359	}
+   360	.ng-table td { padding: 8px 10px; border-bottom: 1px solid #1a2535; }
+   361	.ng-table .td-time { color: var(--text-label); font-family: var(--font-mono); }
+   362	.ng-table .td-id   { color: var(--text-body);  font-family: var(--font-mono); }
+   363	.ng-table .td-conf { color: #c0d0e8; font-family: var(--font-mono); }
+   364	
+   365	/* ── 상세 테이블 (9.5.3.9) ─────────────────────────────── */
+   366	.detail-table-wrap {
+   367	  max-height: 360px;
+   368	  overflow-y: auto;
+   369	  overflow-x: auto;
+   370	  -webkit-overflow-scrolling: touch;
+   371	}
+   372	
+   373	.detail-table {
+   374	  width: 100%;
+   375	  min-width: 760px;
+   376	  border-collapse: collapse;
+   377	  font-size: 12px;
+   378	}
+   379	
+   380	.detail-table th {
+   381	  color: var(--text-label);
+   382	  text-align: left;
+   383	  padding: 6px 10px;
+   384	  border-bottom: 1px solid var(--border-md);
+   385	  font-weight: 600;
+   386	  font-size: 11px;
+   387	  white-space: nowrap;
+   388	}
+   389	
+   390	.detail-table td {
+   391	  padding: 8px 10px;
+   392	  border-bottom: 1px solid #1a2535;
+   393	  vertical-align: middle;
+   394	}
+   395	
+   396	.detail-table-th--right,
+   397	.detail-table-td--right {
+   398	  text-align: right;
+   399	}
+   400	
+   401	.detail-table-mono {
+   402	  color: var(--text-body);
+   403	  font-family: var(--font-mono);
+   404	  font-size: 12px;
+   405	  white-space: nowrap;
+   406	}
+   407	
+   408	.detail-table-num {
+   409	  color: #c0d0e8;
+   410	  font-family: var(--font-mono);
+   411	  font-size: 12px;
+   412	  white-space: nowrap;
+   413	}
+   414	
+   415	.detail-table-text {
+   416	  display: inline-block;
+   417	  max-width: 220px;
+   418	  overflow: hidden;
+   419	  text-overflow: ellipsis;
+   420	  white-space: nowrap;
+   421	  color: var(--text-body);
+   422	}
+   423	
+   424	.detail-table-td--status .status-badge {
+   425	  padding: 2px 8px;
+   426	}
+   427	
+   428	.detail-table-empty,
+   429	.detail-table-empty-state {
+   430	  color: var(--text-label);
+   431	  font-size: 12px;
+   432	}
+   433	
+   434	.detail-table-empty-state {
+   435	  padding: 10px 0;
+   436	}
+   437	
+   438	/* ── 차트 컨테이너 ──────────────────────────────────────── */
+   439	.chart-wrap { position: relative; width: 100%; }
+   440	
+   441	/* ── 홍보 스크린 전용 ───────────────────────────────────── */
+   442	.promo-screen {
+   443	  min-height: calc(100vh - 50px);
+   444	  padding: 28px;
+   445	  background: radial-gradient(ellipse at 20% 20%, #001a2c 0%, #000d18 60%, #0a0014 100%);
+   446	}
+   447	.promo-header { text-align: center; margin-bottom: 30px; }
+   448	.promo-subtitle { color: var(--cyan); font-size: 10px; letter-spacing: 4px; text-transform: uppercase; margin-bottom: 6px; }
+   449	.promo-title { font-size: 26px; font-weight: 900; color: var(--text-main); letter-spacing: 1px; font-family: var(--font-orb); }
+   450	.promo-clock { color: var(--cyan); font-size: 28px; font-weight: 700; margin-top: 6px; font-family: var(--font-orb); }
+   451	
+   452	.promo-kpi-card {
+   453	  background: rgba(255,255,255,0.04);
+   454	  border-radius: var(--radius-card);
+   455	  padding: 22px 20px;
+   456	  text-align: center;
+   457	}
+   458	.promo-kpi-label { color: var(--text-label); font-size: 9px; letter-spacing: 2px; text-transform: uppercase; margin-bottom: 8px; }
+   459	.promo-kpi-value { font-weight: 900; font-family: var(--font-orb); line-height: 1; font-size: 36px; }
+   460	
+   461	.top-defect-panel {
+   462	  background: rgba(255,255,255,0.03);
+   463	  border-radius: 16px;
+   464	  padding: 24px;
+   465	  text-align: center;
+   466	  transition: border-color 0.5s, box-shadow 0.5s;
+   467	}
+   468	.top-defect-rank {
+   469	  display: inline-block;
+   470	  border-radius: 10px;
+   471	  padding: 4px 16px;
+   472	  margin-bottom: 10px;
+   473	  color: var(--text-label);
+   474	  font-size: 12px;
+   475	}
+   476	.top-defect-name {
+   477	  font-size: 40px;
+   478	  font-weight: 900;
+   479	  letter-spacing: 2px;
+   480	  text-transform: uppercase;
+   481	  font-family: var(--font-orb);
+   482	}
+   483	.top-defect-count { color: var(--text-muted); font-size: 15px; margin-top: 8px; }
+   484	.top-defect-dots  { display: flex; justify-content: center; gap: 8px; margin-top: 14px; }
+   485	.dot {
+   486	  width: 8px; height: 8px;
+   487	  border-radius: 50%;
+   488	  background: var(--bg-bar);
+   489	  transition: background 0.3s;
+   490	}
+   491	.dot.active { background: var(--dot-color); }
+   492	
+   493	.promo-chart-panel {
+   494	  background: rgba(255,255,255,0.03);
+   495	  border: 1px solid var(--border-md);
+   496	  border-radius: 16px;
+   497	  padding: 24px;
+   498	}
+   499	
+   500	/* ── 반응형 ─────────────────────────────────────────────── */
+   501	@media (max-width: 767px) {
+   502	  #brand { display: none; }
+   503	
+   504	  .tab-btn {
+   505	    flex: 1;
+   506	    padding: 0 4px;
+   507	    min-width: 0;
+   508	    font-size: 11px;
+   509	  }
+   510	  .tab-emoji { font-size: 20px; }
+   511	  .tab-label { font-size: 9px; }
+   512	  #live-text { display: none; }
+   513	
+   514	  .screen { padding: 14px; }
+   515	
+   516	  .grid-4, .grid-5, .grid-6 { grid-template-columns: repeat(2, 1fr); }
+   517	  .grid-3 { grid-template-columns: repeat(2, 1fr); }
+   518	  .grid-chart { grid-template-columns: 1fr; }
+   519	
+   520	  .kpi-value { font-size: 28px; }
+   521	  .kpi-card  { min-height: 100px; padding: 18px 16px; }
+   522	
+   523	  .defect-bar-label { width: 90px; }
+   524	
+   525	  .risk-donut  { width: 52px !important; height: 52px !important; }
+   526	  .risk-inner  { width: 38px !important; height: 38px !important; }
+   527	  .risk-pct    { font-size: 12px !important; }
+   528	
+   529	  .promo-screen { padding: 16px; }
+   530	  .promo-title  { font-size: 20px; }
+   531	  .promo-clock  { font-size: 22px; }
+   532	  .promo-kpi-value { font-size: 28px; }
+   533	  .promo-kpi-card  { padding: 16px 14px; }
+   534	  .top-defect-name { font-size: 32px; }
+   535	  .top-defect-panel, .promo-chart-panel { padding: 18px; }
+   536	
+   537	  .line-badge { width: 44px !important; height: 44px !important; }
+   538	}
+   539	
+   540	@media (min-width: 768px) and (max-width: 1023px) {
+   541	  .grid-5 { grid-template-columns: repeat(3, 1fr); }
+   542	  .grid-6 { grid-template-columns: repeat(3, 1fr); }
+   543	}
+   544	
+   545	
+   546	/* ── KPI 카드 확장 (9.5.3.3) ────────────────────────────── */
+   547	
+   548	.kpi-card-header {
+   549	  display: flex;
+   550	  align-items: flex-start;
+   551	  justify-content: space-between;
+   552	  gap: 6px;
+   553	  margin-bottom: 6px;
+   554	}
+   555	
+   556	.kpi-status-badge {
+   557	  border-radius: 4px;
+   558	  padding: 1px 7px;
+   559	  font-size: 10px;
+   560	  font-weight: 700;
+   561	  letter-spacing: 0.5px;
+   562	  white-space: nowrap;
+   563	  flex-shrink: 0;
+   564	}
+   565	
+   566	.kpi-value-row {
+   567	  display: flex;
+   568	  align-items: baseline;
+   569	  gap: 5px;
+   570	  margin-bottom: 8px;
+   571	}
+   572	
+   573	.kpi-unit {
+   574	  font-size: 13px;
+   575	  color: var(--text-label);
+   576	  font-family: var(--font-mono);
+   577	  font-weight: 400;
+   578	}
+   579	
+   580	.kpi-card-footer {
+   581	  display: flex;
+   582	  align-items: center;
+   583	  justify-content: space-between;
+   584	  gap: 6px;
+   585	}
+   586	
+   587	.kpi-trend {
+   588	  font-size: 11px;
+   589	  font-family: var(--font-mono);
+   590	  font-weight: 700;
+   591	  white-space: nowrap;
+   592	  flex-shrink: 0;
+   593	}
+   594	
+   595	.kpi-card-footer .kpi-sub {
+   596	  margin: 0;
+   597	  flex: 1;
+   598	  overflow: hidden;
+   599	  text-overflow: ellipsis;
+   600	  white-space: nowrap;
+   601	}
+   602	
+   603	/* [추가] 파일 하단에 추가 (기존 .ng-row 계열은 유지, 덮어쓰기 최소화) */
+   604	
+   605	.list-empty {
+   606	  padding: 10px 0;
+   607	  color: var(--text-label);
+   608	  font-size: 12px;
+   609	}
+   610	
+   611	.promo-top-item {
+   612	  display: flex;
+   613	  justify-content: space-between;
+   614	  align-items: center;
+   615	  padding: 8px 0;
+   616	  border-bottom: 1px solid var(--border);
+   617	  color: var(--text-body);
+   618	  font-size: 13px;
+   619	}
+   620	
+   621	.promo-top-item strong {
+   622	  color: var(--text-main);
+   623	  font-family: var(--font-mono);
+   624	  font-weight: 700;
+   625	}
+
+===== FILE: nginx/html/js/wed_dashboard/dashboard_charts.js =====
+     1	/**
+     2	 * charts.js — Chart.js 기반 차트 렌더링 함수
+     3	 * ──────────────────────────────────────────────────────────
+     4	 * 각 함수는 canvas 요소 ID와 데이터를 받아 차트를 그립니다.
+     5	 * 차트 인스턴스를 Map에 저장해 탭 전환 시 destroy 후 재생성합니다.
+     6	 */
+     7	
+     8	// 생성된 차트 인스턴스 저장 (메모리 누수 방지)
+     9	const chartInstances = new Map();
+    10	
+    11	const CHART_TOKENS = {
+    12	  grid: "#1e2d40",
+    13	  gridSoft: "#1a2535",
+    14	  border: "#1e2d40",
+    15	  cardBg: "#0a111c",
+    16	  tooltipBg: "#0a111cee",
+    17	  textLabel: "#4a5d7a",
+    18	  textBody: "#a0b4cc",
+    19	  textMain: "#e2ecff",
+    20	  green: "#22d3a0",
+    21	  yellow: "#fbbf24",
+    22	  red: "#f87171",
+    23	  blueBar: "#1e3a5f",
+    24	  blueBorder: "#2a4a7f",
+    25	  cyan: "#22d3ee",
+    26	  donutOther: "#3a4a5e",
+    27	  fontMono: "'DM Mono', monospace",
+    28	};
+    29	
+    30	/** 기존 차트를 파괴하고 새로 그리기 위한 준비 */
+    31	function destroyChart(id) {
+    32	  if (chartInstances.has(id)) {
+    33	    chartInstances.get(id).destroy();
+    34	    chartInstances.delete(id);
+    35	  }
+    36	}
+    37	
+    38	// Chart.js 전역 기본값 — 다크 테마에 맞게 조정
+    39	Chart.defaults.color = CHART_TOKENS.textLabel;
+    40	Chart.defaults.font.family = CHART_TOKENS.fontMono;
+    41	Chart.defaults.plugins.legend.labels.boxWidth = 12;
+    42	
+    43	function formatChartNumber(value) {
+    44	  const num = Number(value);
+    45	  if (!Number.isFinite(num)) return "-";
+    46	  return num.toLocaleString("ko-KR");
+    47	}
+    48	
+    49	function formatChartPercent(value, decimals = 1) {
+    50	  const num = Number(value);
+    51	  if (!Number.isFinite(num)) return "-";
+    52	  return num.toFixed(decimals);
+    53	}
+    54	
+    55	function formatChartCompactTick(value) {
+    56	  const num = Number(value);
+    57	  if (!Number.isFinite(num)) return "";
+    58	  if (Math.abs(num) >= 1000) return `${(num / 1000).toFixed(1)}k`;
+    59	  return Number.isInteger(num) ? String(num) : String(num);
+    60	}
+    61	
+    62	function formatChartTimeLabel(value) {
+    63	  if (!value) return "-";
+    64	  const text = String(value);
+    65	  if (/^\d{2}:\d{2}(:\d{2})?$/.test(text)) return text.slice(0, 5);
+    66	
+    67	  const date = new Date(value);
+    68	  if (!Number.isFinite(date.getTime())) return text;
+    69	
+    70	  const hh = String(date.getHours()).padStart(2, "0");
+    71	  const mm = String(date.getMinutes()).padStart(2, "0");
+    72	  return `${hh}:${mm}`;
+    73	}
+    74	
+    75	function formatChartDateTime(value) {
+    76	  if (!value) return "-";
+    77	  const date = new Date(value);
+    78	  if (!Number.isFinite(date.getTime())) return String(value);
+    79	
+    80	  const yyyy = date.getFullYear();
+    81	  const mm = String(date.getMonth() + 1).padStart(2, "0");
+    82	  const dd = String(date.getDate()).padStart(2, "0");
+    83	  const hh = String(date.getHours()).padStart(2, "0");
+    84	  const mi = String(date.getMinutes()).padStart(2, "0");
+    85	  const ss = String(date.getSeconds()).padStart(2, "0");
+    86	  return `${yyyy}-${mm}-${dd} ${hh}:${mi}:${ss}`;
+    87	}
+    88	
+    89	function createChartInstance(canvasId, config) {
+    90	  destroyChart(canvasId);
+    91	  const ctx = document.getElementById(canvasId)?.getContext("2d");
+    92	  if (!ctx) return null;
+    93	
+    94	  const chart = new Chart(ctx, config);
+    95	  chartInstances.set(canvasId, chart);
+    96	  return chart;
+    97	}
+    98	
+    99	function createLineChart(canvasId, config) {
+   100	  return createChartInstance(canvasId, { type: "line", ...config });
+   101	}
+   102	
+   103	function createBarChart(canvasId, config) {
+   104	  return createChartInstance(canvasId, { type: "bar", ...config });
+   105	}
+   106	
+   107	function createDonutChart(canvasId, config) {
+   108	  return createChartInstance(canvasId, { type: "doughnut", ...config });
+   109	}
+   110	
+   111	function createLegendOptions(mode = "hidden") {
+   112	  if (mode === "top-right") {
+   113	    return {
+   114	      display: true,
+   115	      position: "top",
+   116	      align: "end",
+   117	      labels: {
+   118	        boxWidth: 10,
+   119	        padding: 12,
+   120	        font: { size: 11 },
+   121	      },
+   122	    };
+   123	  }
+   124	
+   125	  return { display: false };
+   126	}
+   127	
+   128	function createTooltipOptions(opts = {}) {
+   129	  const base = {
+   130	    backgroundColor: CHART_TOKENS.tooltipBg,
+   131	    borderColor: CHART_TOKENS.border,
+   132	    borderWidth: 1,
+   133	    titleColor: CHART_TOKENS.textLabel,
+   134	    bodyColor: CHART_TOKENS.textBody,
+   135	    padding: 10,
+   136	    callbacks: opts.callbacks ?? {},
+   137	  };
+   138	  if (opts.mode !== undefined) base.mode = opts.mode;
+   139	  if (opts.intersect !== undefined) base.intersect = opts.intersect;
+   140	  return base;
+   141	}
+   142	
+   143	function createTimeAxis(labels, opts = {}) {
+   144	  const maxLabels = opts.maxLabels ?? 10;
+   145	  const skipStep = labels.length > maxLabels ? Math.ceil(labels.length / maxLabels) : 1;
+   146	
+   147	  return {
+   148	    grid: { color: opts.gridColor ?? CHART_TOKENS.grid },
+   149	    ticks: {
+   150	      color: opts.tickColor ?? CHART_TOKENS.textLabel,
+   151	      font: { family: CHART_TOKENS.fontMono, size: 11 },
+   152	      callback: (_value, idx) => (idx % skipStep === 0 ? formatChartTimeLabel(labels[idx]) : ""),
+   153	      maxRotation: 0,
+   154	      autoSkip: false,
+   155	    },
+   156	  };
+   157	}
+   158	
+   159	function createValueAxis(opts = {}) {
+   160	  return {
+   161	    position: opts.position ?? "left",
+   162	    beginAtZero: opts.beginAtZero ?? true,
+   163	    grid: { color: opts.gridColor ?? CHART_TOKENS.grid, display: opts.gridDisplay ?? true },
+   164	    min: opts.min,
+   165	    max: opts.max,
+   166	    suggestedMax: opts.suggestedMax,
+   167	    ticks: {
+   168	      color: opts.tickColor ?? CHART_TOKENS.textLabel,
+   169	      font: { family: CHART_TOKENS.fontMono, size: 11 },
+   170	      callback: opts.compact ? (value) => formatChartCompactTick(value) : undefined,
+   171	    },
+   172	    title: opts.title
+   173	      ? {
+   174	          display: true,
+   175	          text: opts.title,
+   176	          color: opts.titleColor ?? CHART_TOKENS.textLabel,
+   177	          font: { size: 10 },
+   178	        }
+   179	      : undefined,
+   180	  };
+   181	}
+   182	
+   183	function createCountAxis(opts = {}) {
+   184	  return {
+   185	    beginAtZero: true,
+   186	    grid: { color: opts.gridColor ?? CHART_TOKENS.grid, display: opts.gridDisplay ?? true },
+   187	    ticks: {
+   188	      color: opts.tickColor ?? CHART_TOKENS.textLabel,
+   189	      font: { family: CHART_TOKENS.fontMono, size: 11 },
+   190	    },
+   191	  };
+   192	}
+   193	
+   194	function createPercentAxis(opts = {}) {
+   195	  return {
+   196	    position: opts.position ?? "left",
+   197	    min: opts.min ?? 0,
+   198	    max: opts.max,
+   199	    suggestedMax: opts.suggestedMax,
+   200	    grid: { color: opts.gridColor ?? CHART_TOKENS.grid, display: opts.gridDisplay ?? true },
+   201	    ticks: {
+   202	      color: opts.tickColor ?? CHART_TOKENS.textLabel,
+   203	      font: { family: CHART_TOKENS.fontMono, size: 11 },
+   204	      callback: (value) => {
+   205	        const txt = formatChartPercent(value, 1);
+   206	        return txt === "-" ? "-" : `${txt}%`;
+   207	      },
+   208	    },
+   209	    title: opts.title
+   210	      ? {
+   211	          display: true,
+   212	          text: opts.title,
+   213	          color: opts.titleColor ?? CHART_TOKENS.textLabel,
+   214	          font: { size: 10 },
+   215	        }
+   216	      : undefined,
+   217	  };
+   218	}
+   219	
+   220	function prepareDonutDisplayData(items, opts = {}) {
+   221	  const maxItems = opts.maxItems ?? 6;
+   222	  let chartItems = [...(items ?? [])].sort((a, b) => b.value - a.value);
+   223	
+   224	  if (chartItems.length > maxItems) {
+   225	    const topItems = chartItems.slice(0, maxItems);
+   226	    const otherValue = chartItems.slice(maxItems).reduce((sum, item) => sum + (Number(item.value) || 0), 0);
+   227	    topItems.push({ label: "기타", value: otherValue, color: CHART_TOKENS.donutOther });
+   228	    chartItems = topItems;
+   229	  }
+   230	
+   231	  const total = chartItems.reduce((sum, item) => sum + (Number(item.value) || 0), 0);
+   232	  const legendItems = chartItems.map((item) => ({
+   233	    ...item,
+   234	    percentText: total ? `${((Number(item.value) || 0) / total * 100).toFixed(1)}%` : "",
+   235	    valueText: formatChartNumber(item.value),
+   236	  }));
+   237	
+   238	  return { chartItems, legendItems, total };
+   239	}
+   240	
+   241	/* [추가] 기존 helper 영역 하단에 추가 */
+   242	
+   243	function renderCanvasEmpty(canvasId, message = "데이터 없음") {
+   244	  destroyChart(canvasId);
+   245	  const canvas = document.getElementById(canvasId);
+   246	  if (!canvas) return null;
+   247	  const ctx = canvas.getContext("2d");
+   248	  if (!ctx) return null;
+   249	
+   250	  const w = canvas.width || canvas.clientWidth || 300;
+   251	  const h = canvas.height || canvas.clientHeight || 150;
+   252	  ctx.clearRect(0, 0, w, h);
+   253	  ctx.save();
+   254	  ctx.fillStyle = "#4a5d7a";
+   255	  ctx.font = "12px 'DM Mono', monospace";
+   256	  ctx.textAlign = "center";
+   257	  ctx.textBaseline = "middle";
+   258	  ctx.fillText(message, w / 2, h / 2);
+   259	  ctx.restore();
+   260	  return null;
+   261	}
+   262	
+   263	/* [추가] Worker Top3 전용 수평 바 */
+   264	function renderWorkerTopDefectBarChart(canvasId, defects) {
+   265	  const rows = Array.isArray(defects) ? [...defects] : [];
+   266	  if (!rows.length) return renderCanvasEmpty(canvasId, "집계 기간 내 데이터 없음");
+   267	
+   268	  const top3 = rows
+   269	    .filter((d) => Number.isFinite(Number(d.count)))
+   270	    .sort((a, b) => Number(b.count) - Number(a.count))
+   271	    .slice(0, 3);
+   272	
+   273	  if (!top3.length) return renderCanvasEmpty(canvasId, "집계 기간 내 데이터 없음");
+   274	
+   275	  return createBarChart(canvasId, {
+   276	    data: {
+   277	      labels: top3.map((d) => d.class_name),
+   278	      datasets: [
+   279	        {
+   280	          label: "불량 건수",
+   281	          data: top3.map((d) => Number(d.count)),
+   282	          backgroundColor: top3.map((d) => `${d.color}bb`),
+   283	          borderColor: top3.map((d) => d.color),
+   284	          borderWidth: 1,
+   285	          borderRadius: 3,
+   286	          borderSkipped: false,
+   287	        },
+   288	      ],
+   289	    },
+   290	    options: {
+   291	      indexAxis: "y",
+   292	      responsive: true,
+   293	      maintainAspectRatio: false,
+   294	      plugins: {
+   295	        legend: createLegendOptions("hidden"),
+   296	        tooltip: createTooltipOptions({
+   297	          callbacks: {
+   298	            title: (items) => items[0]?.label ?? "-",
+   299	            label: (item) => ` 건수: ${formatChartNumber(item.raw)}건`,
+   300	          },
+   301	        }),
+   302	      },
+   303	      scales: {
+   304	        x: createCountAxis(),
+   305	        y: {
+   306	          grid: { display: false },
+   307	          ticks: {
+   308	            color: CHART_TOKENS.textBody,
+   309	            font: { family: CHART_TOKENS.fontMono, size: 11 },
+   310	          },
+   311	        },
+   312	      },
+   313	    },
+   314	  });
+   315	}
+   316	
+   317	/* [교체] renderDefectRateChart */
+   318	function renderDefectRateChart(canvasId, hourly) {
+   319	  const rows = Array.isArray(hourly) ? hourly : [];
+   320	  const actual = rows.filter((h) => h?.defect_rate !== null && h?.defect_rate !== undefined);
+   321	  if (!actual.length) return renderCanvasEmpty(canvasId, "집계 기간 내 데이터 없음");
+   322	
+   323	  return createLineChart(canvasId, {
+   324	    data: {
+   325	      labels: actual.map((h) => formatChartTimeLabel(h.time)),
+   326	      datasets: [{
+   327	        label: "불량률(%)",
+   328	        data: actual.map((h) => h.defect_rate),
+   329	        borderColor: CHART_TOKENS.yellow,
+   330	        backgroundColor: "rgba(251,191,36,0.08)",
+   331	        borderWidth: 2.5,
+   332	        pointRadius: 4,
+   333	        pointBackgroundColor: CHART_TOKENS.yellow,
+   334	        fill: true,
+   335	      }],
+   336	    },
+   337	    options: {
+   338	      responsive: true,
+   339	      maintainAspectRatio: false,
+   340	      plugins: {
+   341	        legend: createLegendOptions("hidden"),
+   342	        tooltip: createTooltipOptions({
+   343	          callbacks: {
+   344	            title: (items) => `시간: ${items[0].label}`,
+   345	            label: (item) => ` 불량률: ${formatChartPercent(item.raw, 1)}%`,
+   346	          },
+   347	        }),
+   348	      },
+   349	      scales: {
+   350	        x: createTimeAxis(actual.map((h) => formatChartTimeLabel(h.time))),
+   351	        y: createPercentAxis({ max: 10 }),
+   352	      },
+   353	    },
+   354	  });
+   355	}
+   356	
+   357	/* [교체] renderDefectBarChart */
+   358	function renderDefectBarChart(canvasId, defects) {
+   359	  const rows = Array.isArray(defects) ? [...defects] : [];
+   360	  if (!rows.length) return renderCanvasEmpty(canvasId, "집계 기간 내 데이터 없음");
+   361	
+   362	  const top5 = rows
+   363	    .filter((d) => Number.isFinite(Number(d.count)))
+   364	    .sort((a, b) => Number(b.count) - Number(a.count))
+   365	    .slice(0, 5);
+   366	
+   367	  if (!top5.length) return renderCanvasEmpty(canvasId, "집계 기간 내 데이터 없음");
+   368	
+   369	  return createBarChart(canvasId, {
+   370	    data: {
+   371	      labels: top5.map((d) => d.class_name),
+   372	      datasets: [{
+   373	        label: "불량 건수",
+   374	        data: top5.map((d) => Number(d.count)),
+   375	        backgroundColor: top5.map((d) => `${d.color}bb`),
+   376	        borderColor: top5.map((d) => d.color),
+   377	        borderWidth: 1,
+   378	        borderRadius: 3,
+   379	        borderSkipped: false,
+   380	      }],
+   381	    },
+   382	    options: {
+   383	      indexAxis: "y",
+   384	      responsive: true,
+   385	      maintainAspectRatio: false,
+   386	      plugins: {
+   387	        legend: createLegendOptions("hidden"),
+   388	        tooltip: createTooltipOptions({
+   389	          callbacks: {
+   390	            title: (items) => items[0]?.label ?? "-",
+   391	            label: (item) => ` 건수: ${formatChartNumber(item.raw)}건`,
+   392	          },
+   393	        }),
+   394	      },
+   395	      scales: {
+   396	        x: createCountAxis(),
+   397	        y: {
+   398	          grid: { display: false },
+   399	          ticks: { color: CHART_TOKENS.textBody, font: { family: CHART_TOKENS.fontMono, size: 11 } },
+   400	        },
+   401	      },
+   402	    },
+   403	  });
+   404	}
+   405	
+   406	/* [교체] renderHourlyChart */
+   407	function renderHourlyChart(canvasId, hourly) {
+   408	  const rows = Array.isArray(hourly) ? hourly : [];
+   409	  if (!rows.length) return renderCanvasEmpty(canvasId, "집계 기간 내 데이터 없음");
+   410	
+   411	  const labels = rows.map((h) => formatChartTimeLabel(h.time));
+   412	  const produced = rows.map((h) => (h?.produced ?? null));
+   413	  const defectRate = rows.map((h) => (h?.defect_rate ?? null));
+   414	
+   415	  return createBarChart(canvasId, {
+   416	    data: {
+   417	      labels,
+   418	      datasets: [
+   419	        {
+   420	          label: "생산량",
+   421	          data: produced,
+   422	          backgroundColor: CHART_TOKENS.blueBar,
+   423	          borderRadius: 3,
+   424	          yAxisID: "y",
+   425	        },
+   426	        {
+   427	          label: "불량률(%)",
+   428	          data: defectRate,
+   429	          type: "line",
+   430	          borderColor: CHART_TOKENS.yellow,
+   431	          backgroundColor: "transparent",
+   432	          borderWidth: 2.5,
+   433	          pointRadius: 4,
+   434	          pointBackgroundColor: CHART_TOKENS.yellow,
+   435	          spanGaps: false,
+   436	          yAxisID: "y2",
+   437	        },
+   438	      ],
+   439	    },
+   440	    options: {
+   441	      responsive: true,
+   442	      maintainAspectRatio: false,
+   443	      plugins: {
+   444	        legend: createLegendOptions("top-right"),
+   445	        tooltip: createTooltipOptions({
+   446	          mode: "index",
+   447	          intersect: false,
+   448	          callbacks: {
+   449	            title: (items) => `시간: ${items[0].label}`,
+   450	            label: (item) => item.datasetIndex === 0
+   451	              ? ` 생산량: ${formatChartNumber(item.raw)} pcs`
+   452	              : ` 불량률: ${formatChartPercent(item.raw, 1)}%`,
+   453	          },
+   454	        }),
+   455	      },
+   456	      scales: {
+   457	        x: createTimeAxis(labels),
+   458	        y: createValueAxis({ title: "생산량 (pcs)", compact: true }),
+   459	        y2: createPercentAxis({ position: "right", max: 10, gridDisplay: false, title: "불량률 (%)" }),
+   460	      },
+   461	    },
+   462	  });
+   463	}
+   464	
+   465	/* [교체] renderLineOutputChart */
+   466	function renderLineOutputChart(canvasId, lines) {
+   467	  const rows = Array.isArray(lines) ? lines : [];
+   468	  if (!rows.length) return renderCanvasEmpty(canvasId, "집계 기간 내 데이터 없음");
+   469	
+   470	  const STATUS_CLR = { RUN: CHART_TOKENS.green, IDLE: CHART_TOKENS.yellow, DOWN: CHART_TOKENS.red };
+   471	
+   472	  return createBarChart(canvasId, {
+   473	    data: {
+   474	      labels: rows.map((l) => `LINE ${l.id}`),
+   475	      datasets: [
+   476	        {
+   477	          label: "실적 (pcs)",
+   478	          data: rows.map((l) => Number(l.produced ?? 0)),
+   479	          backgroundColor: rows.map((l) => `${STATUS_CLR[l.status] ?? "#4a9eff"}99`),
+   480	          borderColor: rows.map((l) => STATUS_CLR[l.status] ?? "#4a9eff"),
+   481	          borderWidth: 1,
+   482	          borderRadius: 4,
+   483	          order: 1,
+   484	        },
+   485	        {
+   486	          label: "계획 (pcs)",
+   487	          data: rows.map((l) => Number(l.plan ?? 0)),
+   488	          backgroundColor: CHART_TOKENS.blueBar,
+   489	          borderColor: CHART_TOKENS.blueBorder,
+   490	          borderWidth: 1,
+   491	          borderRadius: 4,
+   492	          order: 2,
+   493	        },
+   494	      ],
+   495	    },
+   496	    options: {
+   497	      responsive: true,
+   498	      maintainAspectRatio: false,
+   499	      plugins: {
+   500	        legend: createLegendOptions("top-right"),
+   501	        tooltip: createTooltipOptions({
+   502	          mode: "index",
+   503	          intersect: false,
+   504	          callbacks: {
+   505	            label: (item) => ` ${item.dataset.label}: ${formatChartNumber(item.raw)} pcs`,
+   506	            afterBody: (items) => {
+   507	              const prod = items.find((i) => i.datasetIndex === 0);
+   508	              const plan = items.find((i) => i.datasetIndex === 1);
+   509	              if (!prod || !plan || !plan.raw) return [];
+   510	              return [`달성률: ${formatChartPercent((prod.raw / plan.raw) * 100, 1)}%`];
+   511	            },
+   512	          },
+   513	        }),
+   514	      },
+   515	      scales: {
+   516	        x: { grid: { color: CHART_TOKENS.grid }, ticks: { color: CHART_TOKENS.textLabel, font: { size: 11 } } },
+   517	        y: createValueAxis({ compact: true }),
+   518	      },
+   519	    },
+   520	  });
+   521	}
+   522	
+   523	/* [교체] renderPromoLineChart */
+   524	function renderPromoLineChart(canvasId, hourly) {
+   525	  const rows = Array.isArray(hourly) ? hourly : [];
+   526	  const data = rows.filter((h) => h?.produced !== null && h?.produced !== undefined);
+   527	  if (!data.length) return renderCanvasEmpty(canvasId, "집계 기간 내 데이터 없음");
+   528	
+   529	  return createLineChart(canvasId, {
+   530	    data: {
+   531	      labels: data.map((h) => formatChartTimeLabel(h.time)),
+   532	      datasets: [{
+   533	        label: "생산량",
+   534	        data: data.map((h) => Number(h.produced)),
+   535	        borderColor: CHART_TOKENS.cyan,
+   536	        backgroundColor: "rgba(34,211,238,0.08)",
+   537	        borderWidth: 3,
+   538	        pointRadius: 0,
+   539	        fill: true,
+   540	      }],
+   541	    },
+   542	    options: {
+   543	      responsive: true,
+   544	      maintainAspectRatio: false,
+   545	      plugins: {
+   546	        legend: createLegendOptions("hidden"),
+   547	        tooltip: createTooltipOptions({
+   548	          callbacks: {
+   549	            title: (items) => `시간: ${items[0].label}`,
+   550	            label: (item) => ` 생산량: ${formatChartNumber(item.raw)} pcs`,
+   551	          },
+   552	        }),
+   553	      },
+   554	      scales: {
+   555	        x: createTimeAxis(data.map((h) => formatChartTimeLabel(h.time)), { gridColor: CHART_TOKENS.gridSoft }),
+   556	        y: createValueAxis({ compact: true, gridColor: CHART_TOKENS.gridSoft }),
+   557	      },
+   558	    },
+   559	  });
+   560	}
+   561	
+   562	// ──────────────────────────────────────────────────────────────
+   563	// 9.5.3.7 범용 도넛차트
+   564	// ──────────────────────────────────────────────────────────────
+   565	
+   566	/**
+   567	 * 범용 도넛차트 (비중/구성비)
+   568	 * @param {string} canvasId
+   569	 * @param {Array}  items   - [{ label, value, color }]
+   570	 * @param {object} [opts]
+   571	 *   opts.centerText     - 중심 큰 텍스트 (null/undefined 이면 숨김)
+   572	 *   opts.centerSubText  - 중심 하단 보조 텍스트
+   573	 *   opts.maxItems       - 최대 항목 수, 초과 시 "기타" 합산 (기본 6)
+   574	 *   opts.cutout         - 도넛 두께 (기본 "62%")
+   575	 */
+   576	function renderDonutChart(canvasId, items, opts = {}) {
+   577	  const cutout = opts.cutout ?? "62%";
+   578	  const { chartItems, total } = prepareDonutDisplayData(items, opts);
+   579	
+   580	  // 중심 수치 인라인 플러그인 (opts.centerText 있을 때만 등록)
+   581	  const plugins = [];
+   582	  if (opts.centerText != null) {
+   583	    plugins.push({
+   584	      id: "donutCenter",
+   585	      beforeDraw(chart) {
+   586	        const { ctx: c, chartArea } = chart;
+   587	        const cx = chartArea.left + chartArea.width  / 2;
+   588	        const cy = chartArea.top  + chartArea.height / 2;
+   589	        const hasSub = Boolean(opts.centerSubText);
+   590	        c.save();
+   591	        c.textAlign    = "center";
+   592	        c.textBaseline = "middle";
+   593	        c.fillStyle    = CHART_TOKENS.textMain;
+   594	        c.font         = `700 16px ${CHART_TOKENS.fontMono}`;
+   595	        c.fillText(String(opts.centerText), cx, cy - (hasSub ? 9 : 0));
+   596	        if (hasSub) {
+   597	          c.fillStyle = CHART_TOKENS.textLabel;
+   598	          c.font      = `400 10px ${CHART_TOKENS.fontMono}`;
+   599	          c.fillText(String(opts.centerSubText), cx, cy + 12);
+   600	        }
+   601	        c.restore();
+   602	      },
+   603	    });
+   604	  }
+   605	
+   606	  return createDonutChart(canvasId, {
+   607	    data: {
+   608	      labels: chartItems.map(d => d.label),
+   609	      datasets: [{
+   610	        data:             chartItems.map(d => d.value),
+   611	        backgroundColor:  chartItems.map(d => d.color),
+   612	        borderColor:      CHART_TOKENS.cardBg,
+   613	        borderWidth:      2,
+   614	        hoverBorderWidth: 3,
+   615	      }],
+   616	    },
+   617	    options: {
+   618	      responsive:          true,
+   619	      maintainAspectRatio: false,
+   620	      cutout,
+   621	      plugins: {
+   622	        legend: createLegendOptions("hidden"),
+   623	        tooltip: createTooltipOptions({
+   624	          callbacks: {
+   625	            label: (item) => {
+   626	              const ratio = total ? (Number(item.raw) / total) * 100 : 0;
+   627	              return ` ${item.label}: ${formatChartNumber(item.raw)} (${ratio.toFixed(1)}%)`;
+   628	            },
+   629	          },
+   630	        }),
+   631	      },
+   632	    },
+   633	    plugins,
+   634	  });
+   635	}
+
+===== FILE: nginx/html/web_dashboard.html =====
+     1	<!doctype html>
+     2	<html lang="ko">
+     3	<head>
+     4	  <meta charset="UTF-8" />
+     5	  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+     6	  <title>PCB Dashboard</title>
+     7	  <link rel="stylesheet" href="css/wed_dashboard/dashboard_style.css" />
+     8	  <link rel="stylesheet" href="css/wed_dashboard/dashboard_status.css" />
+     9	  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    10	</head>
+    11	<body>
+    12	  <header class="tabs">
+    13	    <button class="tab-btn" data-tab="worker" id="tab-worker">작업자</button>
+    14	    <button class="tab-btn" data-tab="qa" id="tab-qa">품질관리자</button>
+    15	    <button class="tab-btn active" data-tab="manager" id="tab-manager">관리자</button>
+    16	    <button class="tab-btn" data-tab="promo" id="tab-promo">홍보</button>
+    17	  </header>
+    18	
+    19	  <main id="content"></main>
+    20	
+    21	  <script src="js/wed_dashboard/dashboard_api.js"></script>
+    22	  <script src="js/wed_dashboard/dashboard_charts.js"></script>
+    23	  <script src="js/wed_dashboard/dashboard_app.js"></script>
+    24	</body>
+    25	</html>
+
+===== FILE: server_api/src/modules/dashboard/service.py =====
+     1	# server_api/src/modules/dashboard/service.py
+     2	
+     3	from fastapi import HTTPException
+     4	
+     5	from src.modules.dashboard.cache import DashboardCache
+     6	from src.modules.dashboard.constants import DEFAULT_REFRESH_INTERVAL, SCREEN_ID_MAP
+     7	from src.modules.dashboard.evaluator import evaluate_kpi
+     8	from src.modules.dashboard.repository import DashboardRepository
+     9	from src.modules.dashboard.schemas import DashboardKPIResponse, KPIInput
+    10	
+    11	
+    12	def dashboard_status_placeholder() -> dict:
+    13	    return {
+    14	        "module": "dashboard",
+    15	        "message": "Dashboard KPI polling service is ready.",
+    16	    }
+    17	
+    18	
+    19	def get_cache_key(screen: str) -> str:
+    20	    return f"dashboard:kpis:{screen}"
+    21	
+    22	
+    23	def get_fallback_data(screen: str, repo: DashboardRepository) -> list[KPIInput]:
+    24	    if screen == "worker":
+    25	        return repo.get_recent_worker_kpis()
+    26	    if screen == "promo":
+    27	        return repo.get_recent_promo_kpis()
+    28	    return []
+    29	
+    30	
+    31	def deserialize_kpis(raw_items: list[dict]) -> list[KPIInput]:
+    32	    return [KPIInput.model_validate(item) for item in raw_items]
+    33	
+    34	
+    35	def aggregate_kpi_data(
+    36	    screen: str,
+    37	    repo: DashboardRepository,
+    38	    cache: DashboardCache,
+    39	) -> DashboardKPIResponse:
+    40	    cache_key = get_cache_key(screen)
+    41	    cached = cache.get_json(cache_key)
+    42	
+    43	    if cached and "items" in cached:
+    44	        raw_items = deserialize_kpis(cached["items"])
+    45	        refresh_interval = int(cached.get("refresh_interval", DEFAULT_REFRESH_INTERVAL))
+    46	    else:
+    47	        raw_items = get_fallback_data(screen, repo)
+    48	        refresh_interval = DEFAULT_REFRESH_INTERVAL
+    49	
+    50	    evaluated_items = [
+    51	        evaluate_kpi(item, refresh_interval=refresh_interval)
+    52	        for item in raw_items
+    53	    ]
+    54	
+    55	    return DashboardKPIResponse(
+    56	        screen=screen,
+    57	        screenId=SCREEN_ID_MAP[screen],
+    58	        refreshInterval=refresh_interval,
+    59	        items=evaluated_items,
+    60	    )
+    61	
+    62	
+    63	def get_dashboard_kpis(
+    64	    screen: str,
+    65	    repo: DashboardRepository | None = None,
+    66	    cache: DashboardCache | None = None,
+    67	) -> DashboardKPIResponse:
+    68	    repo = repo or DashboardRepository()
+    69	    cache = cache or DashboardCache()
+    70	
+    71	    if screen not in SCREEN_ID_MAP:
+    72	        raise HTTPException(status_code=400, detail=f"Unsupported screen: {screen}")
+    73	
+    74	    return aggregate_kpi_data(screen=screen, repo=repo, cache=cache)
+
+===== FILE: server_api/src/modules/dashboard/router.py =====
+     1	# server_api/src/modules/dashboard/router.py
+     2	
+     3	from fastapi import APIRouter, Query
+     4	
+     5	from src.modules.dashboard.schemas import DashboardKPIResponse
+     6	from src.modules.dashboard.service import dashboard_status_placeholder, get_dashboard_kpis
+     7	
+     8	router = APIRouter(prefix="/dashboard", tags=["dashboard"])
+     9	
+    10	
+    11	@router.get("/status")
+    12	def dashboard_status():
+    13	    return dashboard_status_placeholder()
+    14	
+    15	
+    16	@router.get("/kpis", response_model=DashboardKPIResponse)
+    17	def read_dashboard_kpis(
+    18	    screen: str = Query(..., pattern="^(worker|qa|manager|promo)$"),
+    19	) -> DashboardKPIResponse:
+    20	    return get_dashboard_kpis(screen=screen)
+
+===== FILE: DB_Structure.erd =====
+     1	{
+     2	  "$schema": "https://raw.githubusercontent.com/dineug/erd-editor/main/json-schema/schema.json",
+     3	  "version": "3.0.0",
+     4	  "settings": {
+     5	    "width": 2000,
+     6	    "height": 2000,
+     7	    "scrollTop": -20.2496,
+     8	    "scrollLeft": 0,
+     9	    "zoomLevel": 0.88,
+    10	    "show": 431,
+    11	    "database": 16,
+    12	    "databaseName": "",
+    13	    "canvasType": "ERD",
+    14	    "language": 1,
+    15	    "tableNameCase": 4,
+    16	    "columnNameCase": 2,
+    17	    "bracketType": 1,
+    18	    "relationshipDataTypeSync": true,
+    19	    "relationshipOptimization": false,
+    20	    "columnOrder": [
+    21	      1,
+    22	      2,
+    23	      4,
+    24	      8,
+    25	      16,
+    26	      32,
+    27	      64
+    28	    ],
+    29	    "maxWidthComment": -1,
+    30	    "ignoreSaveSettings": 0
+    31	  },
+    32	  "doc": {
+    33	    "tableIds": [
+    34	      "paMISTuxizDpbQB-4eZNe",
+    35	      "zcBjzhTCSa4HMSvWxa0Zy",
+    36	      "XbVYQfQEkzdHL-T1kFhKH"
+    37	    ],
+    38	    "relationshipIds": [
+    39	      "mxnc3_o11emW3dnwloGG4",
+    40	      "OJF3GSRWLhc3PUfIy5z4P"
+    41	    ],
+    42	    "indexIds": [],
+    43	    "memoIds": []
+    44	  },
+    45	  "collections": {
+    46	    "tableEntities": {
+    47	      "paMISTuxizDpbQB-4eZNe": {
+    48	        "id": "paMISTuxizDpbQB-4eZNe",
+    49	        "name": "user_table",
+    50	        "comment": "For user data",
+    51	        "columnIds": [
+    52	          "VajGX5KWUBFqirl_MlbiM",
+    53	          "wyq0daZouyhyx_vkwIgik",
+    54	          "_WKeMO08pB7maIRq8w8k4",
+    55	          "1-yjgGBmfzu-ysVqYupAV",
+    56	          "pa7Xue4wCDik6vhNfzEm6",
+    57	          "b7Pme12GqkgcKVRO_xNTn",
+    58	          "ZzgZMMRGgLtKF9BpAVX91",
+    59	          "bD9DBBm7G7R6QEuFDNgHx"
+    60	        ],
+    61	        "seqColumnIds": [
+    62	          "VajGX5KWUBFqirl_MlbiM",
+    63	          "BxtvPrlGH-wbHLIHwoPKO",
+    64	          "wyq0daZouyhyx_vkwIgik",
+    65	          "MHNlHnzM8fvZPyECPJoE3",
+    66	          "_WKeMO08pB7maIRq8w8k4",
+    67	          "1-yjgGBmfzu-ysVqYupAV",
+    68	          "pa7Xue4wCDik6vhNfzEm6",
+    69	          "b7Pme12GqkgcKVRO_xNTn",
+    70	          "ZzgZMMRGgLtKF9BpAVX91",
+    71	          "bD9DBBm7G7R6QEuFDNgHx"
+    72	        ],
+    73	        "ui": {
+    74	          "x": 136,
+    75	          "y": 262,
+    76	          "zIndex": 2,
+    77	          "widthName": 60,
+    78	          "widthComment": 71,
+    79	          "color": ""
+    80	        },
+    81	        "meta": {
+    82	          "updateAt": 1773022435846,
+    83	          "createAt": 1773019186298
+    84	        }
+    85	      },
+    86	      "zcBjzhTCSa4HMSvWxa0Zy": {
+    87	        "id": "zcBjzhTCSa4HMSvWxa0Zy",
+    88	        "name": "Vector_table",
+    89	        "comment": "for Embedding",
+    90	        "columnIds": [
+    91	          "8M-6mDLhny_wAe0710Kql",
+    92	          "_z98ny9U-qIyLCC1RGqF3"
+    93	        ],
+    94	        "seqColumnIds": [
+    95	          "WQEfuu5o1IxMSqvsGVDoZ",
+    96	          "8M-6mDLhny_wAe0710Kql",
+    97	          "_z98ny9U-qIyLCC1RGqF3"
+    98	        ],
+    99	        "ui": {
+   100	          "x": 747,
+   101	          "y": 272,
+   102	          "zIndex": 21,
+   103	          "widthName": 67,
+   104	          "widthComment": 81,
+   105	          "color": ""
+   106	        },
+   107	        "meta": {
+   108	          "updateAt": 1773021333176,
+   109	          "createAt": 1773020535152
+   110	        }
+   111	      },
+   112	      "vJHtkqj52iVd5P6yzw9kQ": {
+   113	        "id": "vJHtkqj52iVd5P6yzw9kQ",
+   114	        "name": "",
+   115	        "comment": "",
+   116	        "columnIds": [],
+   117	        "seqColumnIds": [],
+   118	        "ui": {
+   119	          "x": 219,
+   120	          "y": 100,
+   121	          "zIndex": 56,
+   122	          "widthName": 60,
+   123	          "widthComment": 60,
+   124	          "color": ""
+   125	        },
+   126	        "meta": {
+   127	          "updateAt": 1773020632256,
+   128	          "createAt": 1773020632256
+   129	        }
+   130	      },
+   131	      "XbVYQfQEkzdHL-T1kFhKH": {
+   132	        "id": "XbVYQfQEkzdHL-T1kFhKH",
+   133	        "name": "ChatLog_Data",
+   134	        "comment": "for Chat log",
+   135	        "columnIds": [
+   136	          "SI0arScPwTq1arVYPI6uJ",
+   137	          "Id7XP9hQvhrUOiIjRegH2",
+   138	          "S09YGVTr9JYo_V1t-wVX-"
+   139	        ],
+   140	        "seqColumnIds": [
+   141	          "SI0arScPwTq1arVYPI6uJ",
+   142	          "Id7XP9hQvhrUOiIjRegH2",
+   143	          "S09YGVTr9JYo_V1t-wVX-"
+   144	        ],
+   145	        "ui": {
+   146	          "x": 746.561,
+   147	          "y": 398.7073,
+   148	          "zIndex": 104,
+   149	          "widthName": 76,
+   150	          "widthComment": 65,
+   151	          "color": ""
+   152	        },
+   153	        "meta": {
+   154	          "updateAt": 1773024045336,
+   155	          "createAt": 1773021045480
+   156	        }
+   157	      }
+   158	    },
+   159	    "tableColumnEntities": {
+   160	      "BxtvPrlGH-wbHLIHwoPKO": {
+   161	        "id": "BxtvPrlGH-wbHLIHwoPKO",
+   162	        "tableId": "paMISTuxizDpbQB-4eZNe",
+   163	        "name": "employee_no",
+   164	        "comment": "",
+   165	        "dataType": "VARCHAR",
+   166	        "default": "",
+   167	        "options": 0,
+   168	        "ui": {
+   169	          "keys": 0,
+   170	          "widthName": 73,
+   171	          "widthComment": 60,
+   172	          "widthDataType": 60,
+   173	          "widthDefault": 60
+   174	        },
+   175	        "meta": {
+   176	          "updateAt": 1773020433344,
+   177	          "createAt": 1773019192939
+   178	        }
+   179	      },
+   180	      "wyq0daZouyhyx_vkwIgik": {
+   181	        "id": "wyq0daZouyhyx_vkwIgik",
+   182	        "tableId": "paMISTuxizDpbQB-4eZNe",
+   183	        "name": "password_hash",
+   184	        "comment": "",
+   185	        "dataType": "VARCHAR",
+   186	        "default": "",
+   187	        "options": 0,
+   188	        "ui": {
+   189	          "keys": 0,
+   190	          "widthName": 82,
+   191	          "widthComment": 60,
+   192	          "widthDataType": 60,
+   193	          "widthDefault": 60
+   194	        },
+   195	        "meta": {
+   196	          "updateAt": 1773020445049,
+   197	          "createAt": 1773019216364
+   198	        }
+   199	      },
+   200	      "MHNlHnzM8fvZPyECPJoE3": {
+   201	        "id": "MHNlHnzM8fvZPyECPJoE3",
+   202	        "tableId": "paMISTuxizDpbQB-4eZNe",
+   203	        "name": "role",
+   204	        "comment": "",
+   205	        "dataType": "ENUM",
+   206	        "default": "",
+   207	        "options": 0,
+   208	        "ui": {
+   209	          "keys": 0,
+   210	          "widthName": 60,
+   211	          "widthComment": 60,
+   212	          "widthDataType": 60,
+   213	          "widthDefault": 60
+   214	        },
+   215	        "meta": {
+   216	          "updateAt": 1773020453128,
+   217	          "createAt": 1773020446240
+   218	        }
+   219	      },
+   220	      "_WKeMO08pB7maIRq8w8k4": {
+   221	        "id": "_WKeMO08pB7maIRq8w8k4",
+   222	        "tableId": "paMISTuxizDpbQB-4eZNe",
+   223	        "name": "ID_active",
+   224	        "comment": "",
+   225	        "dataType": "BOOLEAN",
+   226	        "default": "",
+   227	        "options": 0,
+   228	        "ui": {
+   229	          "keys": 0,
+   230	          "widthName": 60,
+   231	          "widthComment": 60,
+   232	          "widthDataType": 60,
+   233	          "widthDefault": 60
+   234	        },
+   235	        "meta": {
+   236	          "updateAt": 1773020460783,
+   237	          "createAt": 1773020454375
+   238	        }
+   239	      },
+   240	      "1-yjgGBmfzu-ysVqYupAV": {
+   241	        "id": "1-yjgGBmfzu-ysVqYupAV",
+   242	        "tableId": "paMISTuxizDpbQB-4eZNe",
+   243	        "name": "ID_locked",
+   244	        "comment": "",
+   245	        "dataType": "BOOLEAN",
+   246	        "default": "",
+   247	        "options": 0,
+   248	        "ui": {
+   249	          "keys": 0,
+   250	          "widthName": 60,
+   251	          "widthComment": 60,
+   252	          "widthDataType": 60,
+   253	          "widthDefault": 60
+   254	        },
+   255	        "meta": {
+   256	          "updateAt": 1773020474759,
+   257	          "createAt": 1773020461952
+   258	        }
+   259	      },
+   260	      "pa7Xue4wCDik6vhNfzEm6": {
+   261	        "id": "pa7Xue4wCDik6vhNfzEm6",
+   262	        "tableId": "paMISTuxizDpbQB-4eZNe",
+   263	        "name": "login_fail_count",
+   264	        "comment": "",
+   265	        "dataType": "BIGINT",
+   266	        "default": "",
+   267	        "options": 0,
+   268	        "ui": {
+   269	          "keys": 0,
+   270	          "widthName": 85,
+   271	          "widthComment": 60,
+   272	          "widthDataType": 60,
+   273	          "widthDefault": 60
+   274	        },
+   275	        "meta": {
+   276	          "updateAt": 1773020485439,
+   277	          "createAt": 1773020475895
+   278	        }
+   279	      },
+   280	      "b7Pme12GqkgcKVRO_xNTn": {
+   281	        "id": "b7Pme12GqkgcKVRO_xNTn",
+   282	        "tableId": "paMISTuxizDpbQB-4eZNe",
+   283	        "name": "token_version",
+   284	        "comment": "",
+   285	        "dataType": "BIGINT",
+   286	        "default": "",
+   287	        "options": 0,
+   288	        "ui": {
+   289	          "keys": 0,
+   290	          "widthName": 75,
+   291	          "widthComment": 60,
+   292	          "widthDataType": 60,
+   293	          "widthDefault": 60
+   294	        },
+   295	        "meta": {
+   296	          "updateAt": 1773020497154,
+   297	          "createAt": 1773020489311
+   298	        }
+   299	      },
+   300	      "ZzgZMMRGgLtKF9BpAVX91": {
+   301	        "id": "ZzgZMMRGgLtKF9BpAVX91",
+   302	        "tableId": "paMISTuxizDpbQB-4eZNe",
+   303	        "name": "join_date",
+   304	        "comment": "",
+   305	        "dataType": "TIMESTAMP",
+   306	        "default": "",
+   307	        "options": 0,
+   308	        "ui": {
+   309	          "keys": 0,
+   310	          "widthName": 60,
+   311	          "widthComment": 60,
+   312	          "widthDataType": 65,
+   313	          "widthDefault": 60
+   314	        },
+   315	        "meta": {
+   316	          "updateAt": 1773020520002,
+   317	          "createAt": 1773020501664
+   318	        }
+   319	      },
+   320	      "bD9DBBm7G7R6QEuFDNgHx": {
+   321	        "id": "bD9DBBm7G7R6QEuFDNgHx",
+   322	        "tableId": "paMISTuxizDpbQB-4eZNe",
+   323	        "name": "last_login",
+   324	        "comment": "",
+   325	        "dataType": "TIMESTAMP",
+   326	        "default": "",
+   327	        "options": 0,
+   328	        "ui": {
+   329	          "keys": 0,
+   330	          "widthName": 60,
+   331	          "widthComment": 60,
+   332	          "widthDataType": 65,
+   333	          "widthDefault": 60
+   334	        },
+   335	        "meta": {
+   336	          "updateAt": 1773020526706,
+   337	          "createAt": 1773020521287
+   338	        }
+   339	      },
+   340	      "_z98ny9U-qIyLCC1RGqF3": {
+   341	        "id": "_z98ny9U-qIyLCC1RGqF3",
+   342	        "tableId": "zcBjzhTCSa4HMSvWxa0Zy",
+   343	        "name": "face_embedding",
+   344	        "comment": "",
+   345	        "dataType": "tsvector",
+   346	        "default": "",
+   347	        "options": 0,
+   348	        "ui": {
+   349	          "keys": 0,
+   350	          "widthName": 89,
+   351	          "widthComment": 60,
+   352	          "widthDataType": 60,
+   353	          "widthDefault": 60
+   354	        },
+   355	        "meta": {
+   356	          "updateAt": 1773020665144,
+   357	          "createAt": 1773020556583
+   358	        }
+   359	      },
+   360	      "WQEfuu5o1IxMSqvsGVDoZ": {
+   361	        "id": "WQEfuu5o1IxMSqvsGVDoZ",
+   362	        "tableId": "zcBjzhTCSa4HMSvWxa0Zy",
+   363	        "name": "employee_no",
+   364	        "comment": "",
+   365	        "dataType": "",
+   366	        "default": "",
+   367	        "options": 0,
+   368	        "ui": {
+   369	          "keys": 0,
+   370	          "widthName": 73,
+   371	          "widthComment": 60,
+   372	          "widthDataType": 60,
+   373	          "widthDefault": 60
+   374	        },
+   375	        "meta": {
+   376	          "updateAt": 1773020673640,
+   377	          "createAt": 1773020667631
+   378	        }
+   379	      },
+   380	      "VajGX5KWUBFqirl_MlbiM": {
+   381	        "id": "VajGX5KWUBFqirl_MlbiM",
+   382	        "tableId": "paMISTuxizDpbQB-4eZNe",
+   383	        "name": "employee_no",
+   384	        "comment": "",
+   385	        "dataType": "VARCHAR",
+   386	        "default": "",
+   387	        "options": 10,
+   388	        "ui": {
+   389	          "keys": 1,
+   390	          "widthName": 73,
+   391	          "widthComment": 60,
+   392	          "widthDataType": 60,
+   393	          "widthDefault": 60
+   394	        },
+   395	        "meta": {
+   396	          "updateAt": 1773021037679,
+   397	          "createAt": 1773020685713
+   398	        }
+   399	      },
+   400	      "8M-6mDLhny_wAe0710Kql": {
+   401	        "id": "8M-6mDLhny_wAe0710Kql",
+   402	        "tableId": "zcBjzhTCSa4HMSvWxa0Zy",
+   403	        "name": "employee_no",
+   404	        "comment": "",
+   405	        "dataType": "VARCHAR",
+   406	        "default": "",
+   407	        "options": 8,
+   408	        "ui": {
+   409	          "keys": 2,
+   410	          "widthName": 73,
+   411	          "widthComment": 60,
+   412	          "widthDataType": 60,
+   413	          "widthDefault": 60
+   414	        },
+   415	        "meta": {
+   416	          "updateAt": 1773020709233,
+   417	          "createAt": 1773020688105
+   418	        }
+   419	      },
+   420	      "SI0arScPwTq1arVYPI6uJ": {
+   421	        "id": "SI0arScPwTq1arVYPI6uJ",
+   422	        "tableId": "XbVYQfQEkzdHL-T1kFhKH",
+   423	        "name": "employee_no",
+   424	        "comment": "",
+   425	        "dataType": "VARCHAR",
+   426	        "default": "",
+   427	        "options": 8,
+   428	        "ui": {
+   429	          "keys": 2,
+   430	          "widthName": 73,
+   431	          "widthComment": 60,
+   432	          "widthDataType": 60,
+   433	          "widthDefault": 60
+   434	        },
+   435	        "meta": {
+   436	          "updateAt": 1773021077257,
+   437	          "createAt": 1773021077257
+   438	        }
+   439	      },
+   440	      "Id7XP9hQvhrUOiIjRegH2": {
+   441	        "id": "Id7XP9hQvhrUOiIjRegH2",
+   442	        "tableId": "XbVYQfQEkzdHL-T1kFhKH",
+   443	        "name": "chat_log",
+   444	        "comment": "",
+   445	        "dataType": "VARCHAR",
+   446	        "default": "",
+   447	        "options": 0,
+   448	        "ui": {
+   449	          "keys": 0,
+   450	          "widthName": 60,
+   451	          "widthComment": 60,
+   452	          "widthDataType": 60,
+   453	          "widthDefault": 60
+   454	        },
+   455	        "meta": {
+   456	          "updateAt": 1773021143617,
+   457	          "createAt": 1773021100271
+   458	        }
+   459	      },
+   460	      "S09YGVTr9JYo_V1t-wVX-": {
+   461	        "id": "S09YGVTr9JYo_V1t-wVX-",
+   462	        "tableId": "XbVYQfQEkzdHL-T1kFhKH",
+   463	        "name": "timestamp",
+   464	        "comment": "",
+   465	        "dataType": "TIMESTAMP",
+   466	        "default": "",
+   467	        "options": 0,
+   468	        "ui": {
+   469	          "keys": 0,
+   470	          "widthName": 60,
+   471	          "widthComment": 60,
+   472	          "widthDataType": 65,
+   473	          "widthDefault": 60
+   474	        },
+   475	        "meta": {
+   476	          "updateAt": 1773021122593,
+   477	          "createAt": 1773021108015
+   478	        }
+   479	      }
+   480	    },
+   481	    "relationshipEntities": {
+   482	      "mxnc3_o11emW3dnwloGG4": {
+   483	        "id": "mxnc3_o11emW3dnwloGG4",
+   484	        "identification": false,
+   485	        "relationshipType": 8,
+   486	        "startRelationshipType": 2,
+   487	        "start": {
+   488	          "tableId": "paMISTuxizDpbQB-4eZNe",
+   489	          "columnIds": [
+   490	            "VajGX5KWUBFqirl_MlbiM"
+   491	          ],
+   492	          "x": 531,
+   493	          "y": 324,
+   494	          "direction": 2
+   495	        },
+   496	        "end": {
+   497	          "tableId": "zcBjzhTCSa4HMSvWxa0Zy",
+   498	          "columnIds": [
+   499	            "8M-6mDLhny_wAe0710Kql"
+   500	          ],
+   501	          "x": 747,
+   502	          "y": 324,
+   503	          "direction": 1
+   504	        },
+   505	        "meta": {
+   506	          "updateAt": 1773020688105,
+   507	          "createAt": 1773020688105
+   508	        }
+   509	      },
+   510	      "OJF3GSRWLhc3PUfIy5z4P": {
+   511	        "id": "OJF3GSRWLhc3PUfIy5z4P",
+   512	        "identification": false,
+   513	        "relationshipType": 16,
+   514	        "startRelationshipType": 2,
+   515	        "start": {
+   516	          "tableId": "paMISTuxizDpbQB-4eZNe",
+   517	          "columnIds": [
+   518	            "VajGX5KWUBFqirl_MlbiM"
+   519	          ],
+   520	          "x": 531,
+   521	          "y": 448,
+   522	          "direction": 2
+   523	        },
+   524	        "end": {
+   525	          "tableId": "XbVYQfQEkzdHL-T1kFhKH",
+   526	          "columnIds": [
+   527	            "SI0arScPwTq1arVYPI6uJ"
+   528	          ],
+   529	          "x": 746.561,
+   530	          "y": 462.7073,
+   531	          "direction": 1
+   532	        },
+   533	        "meta": {
+   534	          "updateAt": 1773021077258,
+   535	          "createAt": 1773021077258
+   536	        }
+   537	      }
+   538	    },
+   539	    "indexEntities": {},
+   540	    "indexColumnEntities": {},
+   541	    "memoEntities": {}
+   542	  }
+   543	}
+

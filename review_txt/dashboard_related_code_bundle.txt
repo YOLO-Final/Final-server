@@ -1,0 +1,90 @@
+PROJECT: Final_project_rss
+
+==================================================
+FILE: server_api/src/modules/dashboard/service.py
+==================================================
+def dashboard_status_placeholder() -> dict:
+    return {
+        "module": "dashboard",
+        "message": "Dashboard skeleton is ready. Wire feature endpoints here.",
+    }
+
+
+==================================================
+FILE: server_api/src/modules/dashboard/router.py
+==================================================
+from fastapi import APIRouter
+
+from src.modules.dashboard.service import dashboard_status_placeholder
+
+router = APIRouter(prefix="/dashboard", tags=["dashboard"])
+
+
+@router.get("/status")
+def dashboard_status():
+    return dashboard_status_placeholder()
+
+
+==================================================
+FILE: nginx/html/js/wed_dashboard/dashboard_api.js
+==================================================
+const MOCK_LINES = [
+  { id: "A", produced: 4200, plan: 5000, defect_rate: 2.1, status: "RUN", worker: "김철수" },
+  { id: "B", produced: 3950, plan: 5000, defect_rate: 3.8, status: "RUN", worker: "이영희" },
+  { id: "C", produced: 2870, plan: 5000, defect_rate: 4.5, status: "DOWN", worker: "박민준" },
+  { id: "D", produced: 2180, plan: 5000, defect_rate: 2.7, status: "IDLE", worker: "최수진" },
+];
+
+const MOCK_DEFECTS = [
+  { class_name: "short", count: 260, risk: 0.82, color: "#f87171" },
+  { class_name: "open", count: 120, risk: 0.65, color: "#fb923c" },
+  { class_name: "spur", count: 100, risk: 0.44, color: "#fbbf24" },
+  { class_name: "mousebite", count: 70, risk: 0.38, color: "#a3e635" },
+  { class_name: "pin_hole", count: 40, risk: 0.29, color: "#34d399" },
+  { class_name: "spurious_copper", count: 50, risk: 0.22, color: "#22d3ee" },
+];
+
+const MOCK_HOURLY = [
+  { time: "08:00", produced: 1200, defect_rate: 2.1, predicted_defect: null },
+  { time: "09:00", produced: 1380, defect_rate: 2.4, predicted_defect: null },
+  { time: "10:00", produced: 1450, defect_rate: 1.9, predicted_defect: null },
+  { time: "11:00", produced: 1310, defect_rate: 3.2, predicted_defect: null },
+  { time: "12:00", produced: 890, defect_rate: 2.8, predicted_defect: null },
+  { time: "13:00", produced: 1420, defect_rate: 2.5, predicted_defect: null },
+  { time: "14:00", produced: 1550, defect_rate: 2.2, predicted_defect: null },
+  { time: "15:00", produced: 1200, defect_rate: null, predicted_defect: 2.8 },
+  { time: "16:00", produced: 1100, defect_rate: null, predicted_defect: 3.1 },
+  { time: "17:00", produced: 1000, defect_rate: null, predicted_defect: 3.0 },
+];
+
+const MOCK_NG_LIST = [
+  { time: "14:59", board_id: "B-0021", cls: "short", conf: 0.97 },
+  { time: "14:58", board_id: "B-0019", cls: "open", conf: 0.91 },
+  { time: "14:57", board_id: "B-0018", cls: "short", conf: 0.94 },
+  { time: "14:56", board_id: "C-0033", cls: "spur", conf: 0.85 },
+  { time: "14:55", board_id: "A-0044", cls: "mousebite", conf: 0.88 },
+  { time: "14:54", board_id: "B-0017", cls: "short", conf: 0.96 },
+  { time: "14:53", board_id: "A-0042", cls: "pin_hole", conf: 0.79 },
+];
+
+const MOCK_SUMMARY = {
+  total_produced: 13200,
+  total_plan: 20000,
+  achievement_rate: 66.0,
+  total_defects: 640,
+  defect_rate: 2.8,
+  predicted_defect_rate: 3.1,
+  lines_running: 2,
+  lines_down: 1,
+};
+
+async function fetchAll() {
+  return {
+    lines: MOCK_LINES,
+    defects: MOCK_DEFECTS,
+    hourly: MOCK_HOURLY,
+    ngList: MOCK_NG_LIST,
+    summary: MOCK_SUMMARY,
+  };
+}
+

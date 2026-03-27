@@ -1,0 +1,39 @@
+전제 조건: nginx(web route configuration)는 개발팀장 영역
+DB의 경우 table 생성 및 수정 요청 시 즉시 반영 예정
+basic dir : home/orugu/Final_project_rss/server_api/src/modules
+
+
+1.JWT
+-> 기영님이 이전에 담당하기로 함
+작업폴더/파일: auth
+
+Auto Inspection
+->camera to image    | recommand: 동인님
+->data injection &YOLO 
+작업폴더/파일: vision
+
+Configuration
+
+-> 기본설정 및 테스트 탭 편집
+
+LLM-간편모드 & 인수인계
+-> 각 질문에 대해 js 동작 관련하여 작업 필요
+-> LLM 연계 출력 필요
+작업폴더/파일: llm_simple.py
+
+LLM-질문모드
+
+작업폴더/파일: llm_question.py
+
+5-1. LLM Result POST
+->Dashboard에서 요청 시 처리 및 return
+작업폴더/파일: llm_result_api.py
+
+Result
+-> 프레임만 만들어뒀음
+-> DB 연계
+작업폴더/파일: report
+
+Dashboard + PDF
+-> Dashboard에서 처리 + PDF Download
+작업폴더/파일: dashboard

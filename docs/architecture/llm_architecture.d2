@@ -1,0 +1,221 @@
+direction: right
+
+vars: {
+  actor_fill: "#F7F3E8"
+  fe_fill: "#E9F5DB"
+  api_fill: "#DCEBFF"
+  svc_fill: "#FFF2CC"
+  vendor_fill: "#FDE2E4"
+  db_fill: "#E8DFF5"
+  note_fill: "#F3F4F6"
+}
+
+title: "LLM Module Architecture"
+
+user: "User / Operator" {
+  style.fill: ${actor_fill}
+  shape: person
+}
+
+fe: "FE Layer" {
+  style.fill: ${fe_fill}
+
+  ops_pages: "Operations Pages\nconfiguration.html / auto.html / iot.html" {
+    style.fill: ${fe_fill}
+  }
+
+  dashboard_js: "nginx/html/js/dashboard.js\nVanilla JS chat/STT/TTS client" {
+    style.fill: ${fe_fill}
+  }
+
+  sample_ui: "server_api/src/modules/llm/sample\nindex.html + static/js/index.js" {
+    style.fill: ${fe_fill}
+  }
+}
+
+be: "BE Layer (FastAPI)" {
+  style.fill: ${api_fill}
+
+  app_entry: "src/main.py\nFastAPI app entry" {
+    style.fill: ${api_fill}
+  }
+
+  api_v1: "src/api/v1/router.py\n/api/v1 router registry" {
+    style.fill: ${api_fill}
+  }
+
+  llm_router: "src/modules/llm/router.py\n/api/v1/llm" {
+    style.fill: ${api_fill}
+  }
+
+  chat_api: "llm_chat_api.py\n/chat, /memory, /knowledge, /upload" {
+    style.fill: ${api_fill}
+  }
+
+  media_api: "llm_media_api.py\n/stt, /tts, /image" {
+    style.fill: ${api_fill}
+  }
+
+  question_api: "llm_question.py\n/recommended-questions" {
+    style.fill: ${api_fill}
+  }
+
+  result_api: "llm_result_api.py\n/result" {
+    style.fill: ${api_fill}
+  }
+}
+
+domain: "Service / Domain Layer" {
+  style.fill: ${svc_fill}
+
+  knowledge_service: "knowledge_service.py\nknowledge file loading + OCR + indexing" {
+    style.fill: ${svc_fill}
+  }
+
+  agent_service: "agent_service.py\nget_agent()" {
+    style.fill: ${svc_fill}
+  }
+
+  cs_agent: "sample/agent.py\nCSAgent orchestration" {
+    style.fill: ${svc_fill}
+  }
+
+  openai_service: "openai_service.py\nOpenAI client factory" {
+    style.fill: ${svc_fill}
+  }
+
+  env_loader: "env_loader.py + settings.py\n.env + app settings" {
+    style.fill: ${svc_fill}
+  }
+}
+
+vendors: "External AI / Search Layer" {
+  style.fill: ${vendor_fill}
+
+  openai_chat: "OpenAI Chat\n(gpt-4o-mini)" {
+    style.fill: ${vendor_fill}
+  }
+
+  openai_audio: "OpenAI Audio\nSTT / TTS" {
+    style.fill: ${vendor_fill}
+  }
+
+  openai_image: "OpenAI Images\n(gpt-image-1 / dall-e-3)" {
+    style.fill: ${vendor_fill}
+  }
+
+  openai_vision: "OpenAI Vision OCR\n(gpt-4.1-mini)" {
+    style.fill: ${vendor_fill}
+  }
+
+  serper: "Serper search API" {
+    style.fill: ${vendor_fill}
+  }
+
+  tavily: "Tavily search API" {
+    style.fill: ${vendor_fill}
+  }
+
+  vllm: "vLLM endpoint\n(optional)" {
+    style.fill: ${vendor_fill}
+  }
+
+  gemini: "Google Gemini\n(optional)" {
+    style.fill: ${vendor_fill}
+  }
+}
+
+data: "Data / State Layer" {
+  style.fill: ${db_fill}
+
+  kb_path: "Knowledge Base Folder\nLLM_KNOWLEDGE_PATH\nTXT / PDF / Image files" {
+    style.fill: ${db_fill}
+  }
+
+  faiss_index: "In-memory FAISS retriever\noptional when embeddings available" {
+    style.fill: ${db_fill}
+  }
+
+  session_state: "In-memory session state\nchat_history / memory_summary /\nknowledge_memory / web_history" {
+    style.fill: ${db_fill}
+  }
+
+  caches: "In-memory caches\n_web_cache / _answer_cache / _llm_cache / _client_cache" {
+    style.fill: ${db_fill}
+  }
+
+  postgres: "PostgreSQL app DB\nuser_table / vector_table /\nface_embedding_table / items" {
+    style.fill: ${db_fill}
+  }
+}
+
+notes: "Verified Notes" {
+  style.fill: ${note_fill}
+
+  no_llm_db: "LLM module does not directly read/write\nSQLAlchemy models or CRUD repositories." {
+    style.fill: ${note_fill}
+  }
+
+  sample_note: "sample/ is a separate LLM demo UI path,\nnot the main nginx operations UI." {
+    style.fill: ${note_fill}
+  }
+}
+
+user -> fe.ops_pages: uses
+user -> fe.sample_ui: uses demo
+
+fe.ops_pages -> fe.dashboard_js: binds UI events
+fe.dashboard_js -> be.llm_router: calls /api/v1/llm/*
+fe.sample_ui -> be.chat_api: calls /api/chat
+fe.sample_ui -> be.media_api: calls /api/stt /api/tts /api/image
+
+be.app_entry -> be.api_v1: includes
+be.api_v1 -> be.llm_router: registers
+be.app_entry -> data.postgres: creates app tables on startup
+
+be.llm_router -> be.chat_api: routes
+be.llm_router -> be.media_api: routes
+be.llm_router -> be.question_api: routes
+be.llm_router -> be.result_api: routes
+
+be.chat_api -> domain.knowledge_service: ensures knowledge / reindex / upload
+be.chat_api -> domain.agent_service: gets singleton agent
+be.chat_api -> domain.cs_agent: streams answer
+be.chat_api -> data.session_state: reads/writes memory
+be.chat_api -> data.kb_path: writes uploaded knowledge files
+
+domain.knowledge_service -> data.kb_path: reads files
+domain.knowledge_service -> vendors.openai_vision: OCR image files
+domain.knowledge_service -> data.faiss_index: builds retriever
+domain.knowledge_service -> domain.cs_agent: injects local docs + retriever
+
+domain.agent_service -> domain.cs_agent: returns singleton
+domain.cs_agent -> data.session_state: stores chat turns
+domain.cs_agent -> data.caches: caches clients / web / answers
+domain.cs_agent -> data.faiss_index: retrieves context
+domain.cs_agent -> vendors.serper: searches fresh web facts
+domain.cs_agent -> vendors.tavily: searches web facts
+domain.cs_agent -> vendors.openai_chat: sends prompt / receives stream
+domain.cs_agent -> vendors.vllm: optional provider
+domain.cs_agent -> vendors.gemini: optional provider
+
+be.question_api -> domain.openai_service: gets OpenAI client
+be.question_api -> vendors.openai_chat: generates recommended questions
+
+be.result_api -> domain.openai_service: gets OpenAI client
+be.result_api -> vendors.openai_chat: single prompt completion
+
+be.media_api -> domain.openai_service: gets OpenAI client
+be.media_api -> vendors.openai_audio: STT / TTS
+be.media_api -> vendors.openai_image: image generation
+
+domain.openai_service -> domain.env_loader: reads env-backed config
+domain.env_loader -> vendors.openai_chat: configures API key
+
+notes.no_llm_db -> data.postgres: boundary
+notes.sample_note -> fe.sample_ui: scope
+
+style: {
+  font: "IBM Plex Sans"
+  text-transform: none
+}

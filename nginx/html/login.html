@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>로그인 | Final Project RSS</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700&family=Noto+Serif+KR:wght@500;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/css/style.css" />
+  </head>
+  <body class="page page-login">
+    <main class="shell">
+      <section class="card card-login reveal">
+        <!-- 온디바이스(PyQt) 로그인 카드: login.js가 이 구조와 id를 기준으로 동작한다. -->
+        <p class="eyebrow">Final Project RSS</p>
+        <h1>로그인</h1>
+        <div class="login-layout">
+          <!-- 로그인 방식 전환 탭: 비밀번호 로그인과 Face ID 로그인을 한 화면에서 전환한다. -->
+          <div class="login-tabs" role="tablist" aria-label="로그인 방식">
+            <button
+              id="tab-password"
+              class="login-tab is-active"
+              type="button"
+              role="tab"
+              aria-selected="true"
+              aria-controls="panel-password"
+              data-target="panel-password"
+            >
+              아이디/비밀번호
+            </button>
+            <button
+              id="tab-face"
+              class="login-tab"
+              type="button"
+              role="tab"
+              aria-selected="false"
+              aria-controls="panel-face"
+              data-target="panel-face"
+            >
+              Face ID
+            </button>
+          </div>
+
+          <!-- 아이디/비밀번호 로그인 패널 -->
+          <section id="panel-password" class="login-pane tab-panel is-active" role="tabpanel" aria-labelledby="tab-password">
+            <form id="login-form" class="form" novalidate>
+              <label for="employee_no">사원번호</label>
+              <input id="employee_no" name="employee_no" type="text" placeholder="사원번호를 입력해주세요" required />
+
+              <label for="password">비밀번호</label>
+              <input id="password" name="password" type="password" placeholder="비밀번호를 입력해주세요" required />
+
+              <button type="submit">로그인</button>
+              <p id="login-error" class="error" aria-live="polite"></p>
+              <p id="fix-password" class="muted" aria-live="polite" style="text-align: center; font-size: 12px; margin-top: 10px; cursor: pointer;">
+                비밀번호 수정
+              </p>
+            </form>
+          </section>
+
+          <!-- Face ID 로그인 패널: 카메라 video 요소와 버튼 id를 login.js가 직접 사용한다. -->
+          <section id="panel-face" class="login-pane tab-panel face-pane" role="tabpanel" aria-labelledby="tab-face" hidden>
+            <h2>Face ID 로그인</h2>
+            <label for="face_employee_no">사원번호 (선택)</label>
+            <input id="face_employee_no" name="face_employee_no" type="text" placeholder="사원번호를 입력하면 정확도가 올라갑니다" />
+            <video id="face-video" class="face-video" autoplay muted playsinline></video>
+            <div class="face-actions">
+              <button id="camera-start" class="ghost" type="button">카메라 시작</button>
+              <button id="camera-stop" class="ghost" type="button">카메라 중지</button>
+            </div>
+            <button id="face-login" type="button">Face ID로 로그인</button>
+            <p id="face-status" class="muted face-status" aria-live="polite">
+              Face ID 탭에서 카메라를 시작할 수 있습니다.
+            </p>
+          </section>
+        </div>
+      </section>
+    </main>
+
+    <!-- on-device 로그인 전용 스크립트 -->
+    <script src="/js/login.js"></script>
+  </body>
+</html>

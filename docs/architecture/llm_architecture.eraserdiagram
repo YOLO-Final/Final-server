@@ -1,0 +1,109 @@
+cloud-architecture-diagram
+direction right
+colorMode pastel
+styleMode shadow
+typeface clean
+
+User [color: "#F7F3E8"]
+
+FE [color: "#E9F5DB"] {
+  OperationsPages [label: "configuration.html / auto.html / iot.html"]
+  DashboardJS [label: "dashboard.js\nVanilla JS chat/STT/TTS client"]
+  SampleUI [label: "server_api/src/modules/llm/sample\nindex.html + static/js/index.js"]
+}
+
+BE [color: "#DCEBFF"] {
+  MainPy [label: "src/main.py\nFastAPI app entry"]
+  ApiV1 [label: "src/api/v1/router.py"]
+  LlmRouter [label: "src/modules/llm/router.py\n/api/v1/llm"]
+  ChatAPI [label: "llm_chat_api.py\n/chat, /memory, /knowledge, /upload"]
+  MediaAPI [label: "llm_media_api.py\n/stt, /tts, /image"]
+  QuestionAPI [label: "llm_question.py\n/recommended-questions"]
+  ResultAPI [label: "llm_result_api.py\n/result"]
+}
+
+Domain [color: "#FFF2CC"] {
+  KnowledgeService [label: "knowledge_service.py\nloading + OCR + indexing"]
+  AgentService [label: "agent_service.py\nget_agent()"]
+  CSAgent [label: "sample/agent.py\nCSAgent orchestration"]
+  OpenAIService [label: "openai_service.py\nOpenAI client factory"]
+  EnvConfig [label: "env_loader.py + settings.py\n.env + app settings"]
+}
+
+External [color: "#FDE2E4"] {
+  OpenAIChat [label: "OpenAI Chat\n(gpt-4o-mini)"]
+  OpenAIAudio [label: "OpenAI Audio\nSTT / TTS"]
+  OpenAIImage [label: "OpenAI Images\n(gpt-image-1 / dall-e-3)"]
+  OpenAIVision [label: "OpenAI Vision OCR\n(gpt-4.1-mini)"]
+  Serper [label: "Serper search API"]
+  Tavily [label: "Tavily search API"]
+  Vllm [label: "vLLM endpoint\n(optional)"]
+  Gemini [label: "Google Gemini\n(optional)"]
+}
+
+Data [color: "#E8DFF5"] {
+  KnowledgeFolder [label: "LLM_KNOWLEDGE_PATH\nTXT / PDF / Image files"]
+  FaissRetriever [label: "In-memory FAISS retriever\noptional"]
+  SessionState [label: "In-memory session state\nchat_history / memory_summary /\nknowledge_memory / web_history"]
+  MemoryCaches [label: "In-memory caches\n_web_cache / _answer_cache /\n_llm_cache / _client_cache"]
+  Postgres [label: "PostgreSQL app DB\nuser_table / vector_table /\nface_embedding_table / items"]
+}
+
+Notes [color: "#F3F4F6"] {
+  NoDirectLlmDb [label: "LLM module has no direct SQLAlchemy CRUD path"]
+  SampleScope [label: "sample/ is demo UI, separate from nginx operations UI"]
+}
+
+User > OperationsPages: uses
+User > SampleUI: uses demo
+
+OperationsPages > DashboardJS: binds events
+DashboardJS > LlmRouter: calls /api/v1/llm/*
+SampleUI > ChatAPI: calls /api/chat
+SampleUI > MediaAPI: calls /api/stt /api/tts /api/image
+
+MainPy > ApiV1: includes
+ApiV1 > LlmRouter: registers
+MainPy > Postgres: create_all on startup
+
+LlmRouter > ChatAPI: routes
+LlmRouter > MediaAPI: routes
+LlmRouter > QuestionAPI: routes
+LlmRouter > ResultAPI: routes
+
+ChatAPI > KnowledgeService: ensure knowledge / upload / reindex
+ChatAPI > AgentService: get singleton
+ChatAPI > CSAgent: stream answer
+ChatAPI > SessionState: read/write memory
+ChatAPI > KnowledgeFolder: save uploads
+
+KnowledgeService > KnowledgeFolder: read files
+KnowledgeService > OpenAIVision: OCR image files
+KnowledgeService > FaissRetriever: build retriever
+KnowledgeService > CSAgent: inject local docs
+
+AgentService > CSAgent: returns singleton
+CSAgent > SessionState: store chat turns
+CSAgent > MemoryCaches: cache web and answers
+CSAgent > FaissRetriever: retrieve context
+CSAgent > Serper: search fresh web facts
+CSAgent > Tavily: search fresh web facts
+CSAgent > OpenAIChat: send prompt / receive stream
+CSAgent > Vllm: optional provider
+CSAgent > Gemini: optional provider
+
+QuestionAPI > OpenAIService: get client
+QuestionAPI > OpenAIChat: generate question list
+
+ResultAPI > OpenAIService: get client
+ResultAPI > OpenAIChat: single prompt completion
+
+MediaAPI > OpenAIService: get client
+MediaAPI > OpenAIAudio: STT / TTS
+MediaAPI > OpenAIImage: image generation
+
+OpenAIService > EnvConfig: read env
+EnvConfig > OpenAIChat: configure API key
+
+NoDirectLlmDb > Postgres: boundary
+SampleScope > SampleUI: scope

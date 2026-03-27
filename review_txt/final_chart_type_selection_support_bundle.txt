@@ -1,0 +1,1316 @@
+PROJECT: Final_project_rss
+
+==================================================
+FILE: nginx/html/js/wed_dashboard/dashboard_charts.js
+==================================================
+/**
+ * charts.js — Chart.js 기반 차트 렌더링 함수
+ * ──────────────────────────────────────────────────────────
+ * 각 함수는 canvas 요소 ID와 데이터를 받아 차트를 그립니다.
+ * 차트 인스턴스를 Map에 저장해 탭 전환 시 destroy 후 재생성합니다.
+ */
+
+// 생성된 차트 인스턴스 저장 (메모리 누수 방지)
+const chartInstances = new Map();
+
+/** 기존 차트를 파괴하고 새로 그리기 위한 준비 */
+function destroyChart(id) {
+  if (chartInstances.has(id)) {
+    chartInstances.get(id).destroy();
+    chartInstances.delete(id);
+  }
+}
+
+// Chart.js 전역 기본값 — 다크 테마에 맞게 조정
+Chart.defaults.color = "#4a5d7a";
+Chart.defaults.font.family = "'DM Mono', monospace";
+Chart.defaults.plugins.legend.labels.boxWidth = 12;
+
+/**
+ * 시간대별 생산량(바) + 실제/예측 불량률(라인) 복합 차트
+ * @param {string} canvasId - <canvas> 요소의 id
+ * @param {Array}  hourly   - /api/hourly 응답 데이터
+ */
+function renderHourlyChart(canvasId, hourly) {
+  destroyChart(canvasId);
+  const ctx = document.getElementById(canvasId)?.getContext("2d");
+  if (!ctx) return;
+
+  const labels         = hourly.map(h => h.time);
+  const produced       = hourly.map(h => h.produced);
+  const defectRate     = hourly.map(h => h.defect_rate);      // 실측 (null이면 점 안그림)
+  const predictedRate  = hourly.map(h => h.predicted_defect); // 예측 (null이면 점 안그림)
+
+  const chart = new Chart(ctx, {
+    type: "bar",
+    data: {
+      labels,
+      datasets: [
+        {
+          label: "생산량",
+          data: produced,
+          backgroundColor: "#1e3a5f",
+          borderRadius: 3,
+          yAxisID: "y",       // 왼쪽 축
+        },
+        {
+          label: "실제 불량률(%)",
+          data: defectRate,
+          type: "line",       // 복합 차트: 바 위에 라인
+          borderColor: "#fbbf24",
+          backgroundColor: "transparent",
+          borderWidth: 2.5,
+          pointRadius: 4,
+          pointBackgroundColor: "#fbbf24",
+          spanGaps: false,    // null 구간 연결 안 함
+          yAxisID: "y2",      // 오른쪽 축
+        },
+        {
+          label: "예측 불량률(%)",
+          data: predictedRate,
+          type: "line",
+          borderColor: "#f87171",
+          backgroundColor: "transparent",
+          borderWidth: 2,
+          borderDash: [6, 3], // 점선
+          pointRadius: 3,
+          pointBackgroundColor: "#f87171",
+          spanGaps: false,
+          yAxisID: "y2",
+        },
+      ],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { display: true },
+        tooltip: { mode: "index", intersect: false },
+      },
+      scales: {
+        x:  { grid: { color: "#1e2d40" } },
+        y:  { grid: { color: "#1e2d40" }, position: "left" },
+        y2: {
+          grid: { display: false },
+          position: "right",
+          min: 0, max: 6,
+          ticks: { callback: v => v + "%" },
+        },
+      },
+    },
+  });
+  chartInstances.set(canvasId, chart);
+}
+
+/**
+ * 시간대별 불량률 라인 차트 (QA 화면 전용)
+ * @param {string} canvasId
+ * @param {Array}  hourly
+ */
+function renderDefectRateChart(canvasId, hourly) {
+  destroyChart(canvasId);
+  const ctx = document.getElementById(canvasId)?.getContext("2d");
+  if (!ctx) return;
+
+  // 실측 데이터만 필터링
+  const actual = hourly.filter(h => h.defect_rate !== null);
+
+  const chart = new Chart(ctx, {
+    type: "line",
+    data: {
+      labels: actual.map(h => h.time),
+      datasets: [{
+        label: "불량률(%)",
+        data: actual.map(h => h.defect_rate),
+        borderColor: "#fbbf24",
+        backgroundColor: "rgba(251,191,36,0.08)",
+        borderWidth: 2.5,
+        pointRadius: 4,
+        pointBackgroundColor: "#fbbf24",
+        fill: true,
+      }],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: {
+        x: { grid: { color: "#1e2d40" } },
+        y: { grid: { color: "#1e2d40" }, min: 0, max: 5, ticks: { callback: v => v + "%" } },
+      },
+    },
+  });
+  chartInstances.set(canvasId, chart);
+}
+
+/**
+ * Defect class 도넛 파이 차트 (QA 화면)
+ * @param {string} canvasId
+ * @param {Array}  defects  - /api/defects 응답 데이터
+ */
+function renderDefectPieChart(canvasId, defects) {
+  destroyChart(canvasId);
+  const ctx = document.getElementById(canvasId)?.getContext("2d");
+  if (!ctx) return;
+
+  const chart = new Chart(ctx, {
+    type: "doughnut",
+    data: {
+      labels: defects.map(d => d.class_name),
+      datasets: [{
+        data: defects.map(d => d.count),
+        backgroundColor: defects.map(d => d.color),
+        borderColor: "#0a111c",
+        borderWidth: 2,
+      }],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false }, // 별도 범례를 HTML로 렌더링
+        tooltip: {
+          callbacks: {
+            label: (item) => ` ${item.label}: ${item.raw}건`,
+          },
+        },
+      },
+      cutout: "60%",  // 도넛 두께
+    },
+  });
+  chartInstances.set(canvasId, chart);
+}
+
+/**
+ * 홍보 스크린 생산 추이 라인 차트
+ * @param {string} canvasId
+ * @param {Array}  hourly
+ */
+function renderPromoLineChart(canvasId, hourly) {
+  destroyChart(canvasId);
+  const ctx = document.getElementById(canvasId)?.getContext("2d");
+  if (!ctx) return;
+
+  // produced 값이 있는 행만 사용
+  const data = hourly.filter(h => h.produced);
+
+  const chart = new Chart(ctx, {
+    type: "line",
+    data: {
+      labels: data.map(h => h.time),
+      datasets: [{
+        label: "생산량",
+        data: data.map(h => h.produced),
+        borderColor: "#22d3ee",
+        backgroundColor: "rgba(34,211,238,0.08)",
+        borderWidth: 3,
+        pointRadius: 0, // 점 숨김 (깔끔하게)
+        fill: true,
+      }],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: {
+        x: { grid: { color: "#1a2535" } },
+        y: { grid: { color: "#1a2535" } },
+      },
+    },
+  });
+  chartInstances.set(canvasId, chart);
+}
+
+
+==================================================
+FILE: nginx/html/js/wed_dashboard/dashboard_app.js
+==================================================
+/**
+ * app.js — 메인 애플리케이션 로직
+ * ──────────────────────────────────────────────────────────
+ * 역할:
+ *  1. 앱 시작 시 API에서 전체 데이터 로드
+ *  2. 탭 전환 처리 (worker / qa / manager / promo)
+ *  3. 각 화면 HTML 렌더링 + 차트 초기화
+ *  4. 홍보 스크린: 실시간 시계 + TOP Defect 자동 롤링
+ */
+
+// ── 탭 정의 (id, 레이블, 활성 색상) ─────────────────────
+const TABS = [
+  { id: "worker",  label: "작업자",    color: "#f87171" },
+  { id: "qa",      label: "품질관리자", color: "#fbbf24" },
+  { id: "manager", label: "관리자",    color: "#22d3a0" },
+  { id: "promo",   label: "홍보",      color: "#22d3ee" },
+];
+
+// 현재 활성 탭
+let currentTab = "manager";
+
+// API 데이터 캐시 (탭 전환 시 재요청 없이 재사용)
+let cache = null;
+
+// 홍보 스크린 타이머 ID (언마운트 시 클리어)
+let promoTimers = [];
+
+// ── 상태별 색상 ──────────────────────────────────────────
+const STATUS_COLOR = { RUN: "#22d3a0", IDLE: "#fbbf24", DOWN: "#f87171" };
+const STATUS_BG    = { RUN: "#022c22", IDLE: "#2c1d00", DOWN: "#2d0000" };
+
+/** defects 배열에서 class_name으로 색상 조회 */
+function defectColor(clsName, defects) {
+  return defects.find(d => d.class_name === clsName)?.color ?? "#6b7fa3";
+}
+
+// ── 유틸: HTML 이스케이프 (XSS 방지) ────────────────────
+function esc(str) {
+  return String(str)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
+// ── 유틸: 숫자 포맷 ─────────────────────────────────────
+const fmt  = (n) => Number(n).toLocaleString("ko-KR");
+const pct  = (n, dec = 1) => Number(n).toFixed(dec) + "%";
+
+// ════════════════════════════════════════════════════════
+// 🖼️ HTML 렌더러
+// ════════════════════════════════════════════════════════
+
+/** KPI 카드 HTML 생성 (재사용 가능) */
+function kpiCardHTML({ label, value, sub = "", accent }) {
+  return `
+    <div class="kpi-card" style="border:1px solid ${accent}33; box-shadow:0 0 20px ${accent}14;">
+      <div class="kpi-label">${esc(label)}</div>
+      <div class="kpi-value" style="color:${accent}">${esc(value)}</div>
+      ${sub ? `<div class="kpi-sub">${esc(sub)}</div>` : ""}
+    </div>`;
+}
+
+// ── SCREEN 1: 작업자 ─────────────────────────────────────
+function renderWorker({ defects, ngList, summary }) {
+  const maxCount = Math.max(...defects.map(d => d.count));
+
+  // KPI 카드 데이터
+  const kpis = [
+    { label: "목표 생산량",  value: "12,000 pcs",      accent: "#4a9eff", sub: "오늘 LINE B" },
+    { label: "현재 생산량",  value: "7,840 pcs",        accent: "#22d3a0", sub: "달성률 65.3%" },
+    { label: "현재 불량률",  value: "2.8%",             accent: "#fbbf24", sub: "예측 3.4%" },
+    { label: "최근 10분 NG", value: "26건",             accent: "#f87171", sub: "주요: short" },
+  ];
+
+  // Defect 바 리스트 HTML
+  const defectBars = defects.map(d => `
+    <div class="defect-bar-row">
+      <div class="defect-bar-label">${esc(d.class_name)}</div>
+      <div class="defect-bar-track">
+        <div class="defect-bar-fill" style="width:${(d.count / maxCount * 100).toFixed(1)}%; background:${d.color};"></div>
+      </div>
+      <div class="defect-bar-count" style="color:${d.color}">${d.count}</div>
+    </div>`).join("");
+
+  // NG 로그 HTML (최대 7개)
+  const ngRows = ngList.slice(0, 7).map(r => {
+    const clsColor = defectColor(r.cls, defects);
+    const lineId   = r.board_id.split("-")[0];
+    const confPct  = Math.floor(r.conf * 100);
+    return `
+      <div class="ng-row">
+        <span class="ng-time">${esc(r.time)}</span>
+        <span class="ng-line">LINE ${esc(lineId)}</span>
+        <span class="ng-badge" style="background:${clsColor}22; color:${clsColor}; border:1px solid ${clsColor}44">${esc(r.cls)}</span>
+        <span class="ng-conf">${confPct}%</span>
+        <span class="ng-tag">NG</span>
+      </div>`;
+  }).join("");
+
+  return `
+    <div class="screen">
+      <!-- 경고 배너 -->
+      <div class="alert-banner">
+        <span class="alert-icon">⚠</span>
+        <div style="flex:1">
+          <div class="alert-title">LINE B — short 불량 급증 감지</div>
+          <div class="alert-msg">최근 10분 26건 발생 · 즉시 점검 요망</div>
+        </div>
+        <span class="alert-time">14:59:21</span>
+      </div>
+
+      <!-- KPI 카드 2열(모바일)/4열(태블릿+) -->
+      <div class="grid grid-4" style="gap:10px">
+        ${kpis.map(kpiCardHTML).join("")}
+      </div>
+
+      <!-- 하단 2단 -->
+      <div class="grid grid-chart">
+        <!-- Defect 바 차트 -->
+        <div class="card">
+          <div class="section-title">Defect Class 실시간</div>
+          ${defectBars}
+        </div>
+
+        <!-- NG 로그 -->
+        <div class="card">
+          <div class="section-title">실시간 NG 로그</div>
+          ${ngRows}
+        </div>
+      </div>
+    </div>`;
+}
+
+// ── SCREEN 2: 품질관리자 ─────────────────────────────────
+function renderQA({ defects, hourly, ngList }) {
+  const total = defects.reduce((a, d) => a + d.count, 0);
+
+  const kpis = [
+    { label: "검사 수량",   value: "8,420",   accent: "#60a5fa" },
+    { label: "양품 수량",   value: "8,065",   accent: "#34d399" },
+    { label: "총 불량",     value: "640",     accent: "#f87171" },
+    { label: "불량률",      value: "7.60%",   accent: "#fbbf24" },
+    { label: "예측 불량률", value: "8.1%",    accent: "#fb923c" },
+    { label: "재검 필요",   value: "48",      accent: "#c084fc" },
+  ];
+
+  // 도넛 차트 범례 HTML
+  const pieLegend = defects.map(d => `
+    <div style="display:flex; align-items:center; gap:6px; margin-bottom:7px">
+      <div style="width:8px; height:8px; border-radius:50%; background:${d.color}; flex-shrink:0"></div>
+      <span style="font-size:11px; color:#6b7fa3; flex:1">${esc(d.class_name)}</span>
+      <span style="font-size:12px; color:${d.color}; font-family:'DM Mono',monospace; font-weight:700">
+        ${(d.count / total * 100).toFixed(1)}%
+      </span>
+    </div>`).join("");
+
+  // NG 테이블 행 HTML
+  const tableRows = ngList.map(r => {
+    const clsColor = defectColor(r.cls, defects);
+    return `
+      <tr>
+        <td class="td-time">${esc(r.time)}</td>
+        <td class="td-id">${esc(r.board_id)}</td>
+        <td>
+          <span style="background:${clsColor}22; color:${clsColor}; border:1px solid ${clsColor}44; border-radius:4px; padding:2px 8px; font-size:11px; font-family:'DM Mono',monospace">
+            ${esc(r.cls)}
+          </span>
+        </td>
+        <td class="td-conf">${Math.floor(r.conf * 100)}%</td>
+        <td><span style="color:#f87171; font-size:11px; font-weight:700">NG</span></td>
+      </tr>`;
+  }).join("");
+
+  return `
+    <div class="screen">
+      <!-- KPI 2/3/6열 -->
+      <div class="grid grid-6" style="gap:10px">
+        ${kpis.map(kpiCardHTML).join("")}
+      </div>
+
+      <!-- 차트 2단 -->
+      <div class="grid grid-chart">
+        <!-- 불량률 라인 차트 -->
+        <div class="card">
+          <div class="section-title">시간대별 불량률 추이</div>
+          <div class="chart-wrap" style="height:210px">
+            <canvas id="qaLineChart"></canvas>
+          </div>
+        </div>
+
+        <!-- 도넛 파이 + 범례 -->
+        <div class="card">
+          <div class="section-title">Defect Class 구성</div>
+          <div style="display:flex; gap:10px; align-items:center">
+            <div style="width:150px; height:150px; flex-shrink:0">
+              <canvas id="qaPieChart"></canvas>
+            </div>
+            <div style="flex:1">${pieLegend}</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- NG 테이블 (모바일: 가로 스크롤) -->
+      <div class="card">
+        <div class="section-title">NG 검출 리스트</div>
+        <div style="overflow-x:auto; -webkit-overflow-scrolling:touch">
+          <table class="ng-table" style="min-width:420px">
+            <thead>
+              <tr>
+                ${["시간","Board ID","Class","Conf.","결과"].map(h => `<th>${h}</th>`).join("")}
+              </tr>
+            </thead>
+            <tbody>${tableRows}</tbody>
+          </table>
+        </div>
+      </div>
+    </div>`;
+}
+
+// ── SCREEN 3: 관리자 ─────────────────────────────────────
+function renderManager({ lines, defects, hourly, summary }) {
+  const { total_produced, total_plan, achievement_rate } = summary;
+
+  const kpis = [
+    { label: "계획 생산량", value: fmt(total_plan) + " pcs",      accent: "#60a5fa", sub: "오늘 전체" },
+    { label: "실제 생산량", value: fmt(total_produced) + " pcs",  accent: "#22d3a0", sub: `달성 ${achievement_rate}%` },
+    { label: "예상 종료량", value: "19,100 pcs",                  accent: "#a78bfa", sub: "종료 시 예측" },
+    { label: "현재 불량률", value: "2.8%",                        accent: "#fbbf24", sub: "전일 -0.9%" },
+    { label: "예측 불량률", value: "3.1%",                        accent: "#f87171", sub: "종료 시 예측" },
+  ];
+
+  // 라인별 현황 카드 HTML
+  const lineCards = lines.map(l => {
+    const clr  = STATUS_COLOR[l.status];
+    const bg   = STATUS_BG[l.status];
+    const barColor = l.status === "DOWN" ? "#f87171" : l.status === "IDLE" ? "#fbbf24" : "#22d3a0";
+    const barPct   = ((l.produced / l.plan) * 100).toFixed(1);
+    return `
+      <div class="line-card">
+        <div style="display:flex; align-items:center; gap:12px">
+          <div class="line-badge" style="background:${bg}; border:1px solid ${clr}55; color:${clr}">L${esc(l.id)}</div>
+          <div class="line-info">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:5px">
+              <span class="line-produced">${fmt(l.produced)} <small>pcs</small></span>
+              <span class="line-status-badge" style="color:${clr}; background:${bg}; border:1px solid ${clr}55">${esc(l.status)}</span>
+            </div>
+            <div style="display:flex; align-items:center; gap:8px">
+              <div class="progress-track">
+                <div class="progress-fill" style="width:${barPct}%; background:${barColor}"></div>
+              </div>
+              <span style="font-size:11px; color:#4a5d7a; flex-shrink:0">불량 ${l.defect_rate}%</span>
+            </div>
+          </div>
+        </div>
+      </div>`;
+  }).join("");
+
+  // Defect 리스크 게이지 HTML
+  const gauges = defects.map(d => {
+    const deg = (d.risk * 360).toFixed(0);
+    return `
+      <div class="risk-gauge-wrap" style="border:1px solid ${d.color}2a">
+        <div class="risk-label">${esc(d.class_name)}</div>
+        <div class="risk-donut" style="width:56px;height:56px; background:conic-gradient(${d.color} ${deg}deg, #1e2d40 0)">
+          <div class="risk-inner" style="width:42px;height:42px">
+            <span class="risk-pct" style="color:${d.color}">${(d.risk * 100).toFixed(0)}%</span>
+          </div>
+        </div>
+        <div class="risk-count">${d.count}건</div>
+      </div>`;
+  }).join("");
+
+  return `
+    <div class="screen">
+      <!-- ① KPI 5열 -->
+      <div class="grid grid-5" style="gap:10px">
+        ${kpis.map(kpiCardHTML).join("")}
+      </div>
+
+      <!-- ② 복합 차트 + 라인 현황 -->
+      <div class="grid grid-chart">
+        <div class="card">
+          <div class="section-title">시간대별 생산량 / 불량률</div>
+          <div class="chart-wrap" style="height:230px">
+            <canvas id="managerHourlyChart"></canvas>
+          </div>
+        </div>
+        <div class="card">
+          <div class="section-title">라인별 현황</div>
+          ${lineCards}
+        </div>
+      </div>
+
+      <!-- ③ Defect 리스크 게이지 -->
+      <div class="card">
+        <div class="section-title">다음 2시간 Defect Class 위험도 예측</div>
+        <div class="grid grid-6" style="gap:10px">${gauges}</div>
+        <div style="margin-top:14px; background:#1c0a00; border-radius:8px; padding:10px 14px; border:1px solid #f8717144">
+          <span style="color:#fbbf24; font-size:12px; font-weight:700">⚠ </span>
+          <span style="color:#fca5a5; font-size:12px">short 급증 위험 · LINE B 최근 30분 +42% — 즉각 점검 권고</span>
+        </div>
+      </div>
+    </div>`;
+}
+
+// ── SCREEN 4: 홍보 ───────────────────────────────────────
+function renderPromo({ defects, hourly }) {
+  const kpis = [
+    { label: "오늘 총 생산량",  value: "13,200 pcs",  color: "#22d3ee" },
+    { label: "목표 달성률",    value: "66.0%",        color: "#22d3a0" },
+    { label: "현재 양품률",    value: "97.2%",        color: "#4ade80" },
+    { label: "현재 불량률",    value: "2.8%",         color: "#fbbf24" },
+    { label: "전일 대비 개선", value: "+0.9%",        color: "#34d399" },
+    { label: "AI 검출",       value: "1,842 boards",  color: "#a78bfa" },
+  ];
+
+  const kpiCards = kpis.map(c => `
+    <div class="promo-kpi-card" style="border:1px solid ${c.color}33; box-shadow:0 0 30px ${c.color}0a">
+      <div class="promo-kpi-label">${esc(c.label)}</div>
+      <div class="promo-kpi-value" style="color:${c.color}">${esc(c.value)}</div>
+    </div>`).join("");
+
+  return `
+    <div class="promo-screen">
+      <!-- 헤더 -->
+      <div class="promo-header">
+        <div class="promo-subtitle">Smart Factory PCB</div>
+        <h2 class="promo-title">오늘의 생산 현황</h2>
+        <div class="promo-clock" id="promoClock">00:00:00</div>
+      </div>
+
+      <!-- KPI -->
+      <div class="grid grid-3" style="gap:16px; margin-bottom:20px">
+        ${kpiCards}
+      </div>
+
+      <!-- TOP Defect 롤링 + 생산 추이 -->
+      <div class="grid" style="grid-template-columns:1fr 1fr; gap:16px">
+        <!-- TOP Defect 패널 (JS로 동적 업데이트) -->
+        <div class="top-defect-panel" id="topDefectPanel">
+          <div style="color:#4a5d7a; font-size:10px; letter-spacing:3px; text-transform:uppercase; margin-bottom:14px">TOP Defect (자동 롤링)</div>
+          <div class="top-defect-rank" id="topDefectRank">#1</div>
+          <div class="top-defect-name" id="topDefectName">—</div>
+          <div class="top-defect-count" id="topDefectCount">— 건 발생</div>
+          <div class="top-defect-dots" id="topDefectDots"></div>
+        </div>
+
+        <!-- 생산 추이 차트 -->
+        <div class="promo-chart-panel">
+          <div style="color:#4a5d7a; font-size:10px; letter-spacing:3px; text-transform:uppercase; margin-bottom:12px; text-align:center">시간대별 생산 추이</div>
+          <div class="chart-wrap" style="height:160px">
+            <canvas id="promoLineChart"></canvas>
+          </div>
+        </div>
+      </div>
+    </div>`;
+}
+
+// ════════════════════════════════════════════════════════
+// 🔄 홍보 스크린 인터랙션
+// ════════════════════════════════════════════════════════
+
+/**
+ * 홍보 스크린의 실시간 시계 + TOP Defect 롤링 시작
+ * @param {Array} defects
+ */
+function startPromoTimers(defects) {
+  // 기존 타이머 정리
+  promoTimers.forEach(clearInterval);
+  promoTimers = [];
+
+  // 발생 건수 내림차순 정렬
+  const sorted = [...defects].sort((a, b) => b.count - a.count).slice(0, 3);
+  let idx = 0;
+
+  /** TOP Defect 패널 업데이트 */
+  function updateTopDefect() {
+    const d     = sorted[idx];
+    const panel = document.getElementById("topDefectPanel");
+    const rank  = document.getElementById("topDefectRank");
+    const name  = document.getElementById("topDefectName");
+    const count = document.getElementById("topDefectCount");
+    const dots  = document.getElementById("topDefectDots");
+    if (!panel) return;
+
+    panel.style.borderColor  = d.color + "44";
+    panel.style.boxShadow    = `0 0 40px ${d.color}18`;
+    rank.style.background    = d.color + "18";
+    rank.style.border        = `2px solid ${d.color}66`;
+    rank.textContent         = `#${idx + 1}`;
+    name.style.color         = d.color;
+    name.textContent         = d.class_name.toUpperCase();
+    count.textContent        = `${d.count}건 발생`;
+
+    // 페이지 인디케이터 점 렌더링
+    dots.innerHTML = sorted.map((s, i) =>
+      `<div class="dot ${i === idx ? "active" : ""}" style="--dot-color:${s.color}"></div>`
+    ).join("");
+
+    idx = (idx + 1) % sorted.length;
+  }
+
+  updateTopDefect(); // 즉시 1회 실행
+  promoTimers.push(setInterval(updateTopDefect, 3000)); // 3초마다 전환
+
+  /** 실시간 시계 업데이트 */
+  function updateClock() {
+    const el = document.getElementById("promoClock");
+    if (el) el.textContent = new Date().toLocaleTimeString("ko-KR");
+  }
+
+  updateClock();
+  promoTimers.push(setInterval(updateClock, 1000)); // 1초마다 갱신
+}
+
+// ════════════════════════════════════════════════════════
+// 🏠 탭 전환 & 앱 초기화
+// ════════════════════════════════════════════════════════
+
+/**
+ * 탭을 활성화하고 해당 화면을 렌더링합니다.
+ * @param {string} tabId - "worker" | "qa" | "manager" | "promo"
+ */
+function activateTab(tabId) {
+  // 홍보 스크린 타이머 정리 (다른 탭으로 이동 시)
+  if (currentTab === "promo") {
+    promoTimers.forEach(clearInterval);
+    promoTimers = [];
+  }
+
+  currentTab = tabId;
+
+  // 탭 버튼 활성 스타일 적용
+  document.querySelectorAll(".tab-btn").forEach(btn => {
+    const isActive = btn.dataset.tab === tabId;
+    btn.classList.toggle("active", isActive);
+    if (isActive) {
+      const tabDef = TABS.find(t => t.id === tabId);
+      btn.style.setProperty("--tab-color", tabDef?.color ?? "#22d3a0");
+    }
+  });
+
+  // 캐시 데이터로 화면 렌더링
+  const { lines, defects, hourly, ngList, summary } = cache;
+  const content = document.getElementById("content");
+
+  // 화면별 HTML 렌더링
+  switch (tabId) {
+    case "worker":  content.innerHTML = renderWorker({ defects, ngList, summary });   break;
+    case "qa":      content.innerHTML = renderQA({ defects, hourly, ngList });        break;
+    case "manager": content.innerHTML = renderManager({ lines, defects, hourly, summary }); break;
+    case "promo":   content.innerHTML = renderPromo({ defects, hourly });             break;
+  }
+
+  // 화면별 차트 초기화 (DOM 삽입 후 실행됨)
+  requestAnimationFrame(() => {
+    switch (tabId) {
+      case "worker":
+        // 작업자 화면: 차트 없음 (바는 CSS로 렌더링)
+        break;
+      case "qa":
+        renderDefectRateChart("qaLineChart", hourly);
+        renderDefectPieChart("qaPieChart", defects);
+        break;
+      case "manager":
+        renderHourlyChart("managerHourlyChart", hourly);
+        break;
+      case "promo":
+        renderPromoLineChart("promoLineChart", hourly);
+        startPromoTimers(defects);
+        break;
+    }
+  });
+}
+
+/**
+ * 앱 초기화 — DOM 로드 후 실행
+ * 1. API에서 전체 데이터 로드
+ * 2. 탭 이벤트 리스너 등록
+ * 3. 기본 탭(관리자) 활성화
+ */
+async function initApp() {
+  try {
+    // 모든 API 병렬 호출 (fetchAll: api.js)
+    cache = await fetchAll();
+
+    // 탭 버튼 클릭 이벤트 등록
+    document.querySelectorAll(".tab-btn").forEach(btn => {
+      btn.addEventListener("click", () => activateTab(btn.dataset.tab));
+    });
+
+    // 기본 탭 활성화
+    activateTab("manager");
+
+  } catch (err) {
+    // API 오류 시 에러 메시지 표시
+    document.getElementById("content").innerHTML = `
+      <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; height:60vh; color:#f87171; gap:12px">
+        <div style="font-size:32px">⚠</div>
+        <div>API 연결 실패: ${esc(err.message)}</div>
+        <div style="font-size:12px; color:#4a5d7a">FastAPI 서버가 실행 중인지 확인하세요</div>
+        <code style="font-size:11px; color:#6b7fa3">uvicorn backend.main:app --reload</code>
+      </div>`;
+  }
+}
+
+// DOM 준비 완료 후 앱 초기화 실행
+document.addEventListener("DOMContentLoaded", initApp);
+
+
+==================================================
+FILE: nginx/html/js/wed_dashboard/dashboard_api.js
+==================================================
+const MOCK_LINES = [
+  { id: "A", produced: 4200, plan: 5000, defect_rate: 2.1, status: "RUN", worker: "김철수" },
+  { id: "B", produced: 3950, plan: 5000, defect_rate: 3.8, status: "RUN", worker: "이영희" },
+  { id: "C", produced: 2870, plan: 5000, defect_rate: 4.5, status: "DOWN", worker: "박민준" },
+  { id: "D", produced: 2180, plan: 5000, defect_rate: 2.7, status: "IDLE", worker: "최수진" },
+];
+
+const MOCK_DEFECTS = [
+  { class_name: "short", count: 260, risk: 0.82, color: "#f87171" },
+  { class_name: "open", count: 120, risk: 0.65, color: "#fb923c" },
+  { class_name: "spur", count: 100, risk: 0.44, color: "#fbbf24" },
+  { class_name: "mousebite", count: 70, risk: 0.38, color: "#a3e635" },
+  { class_name: "pin_hole", count: 40, risk: 0.29, color: "#34d399" },
+  { class_name: "spurious_copper", count: 50, risk: 0.22, color: "#22d3ee" },
+];
+
+const MOCK_HOURLY = [
+  { time: "08:00", produced: 1200, defect_rate: 2.1, predicted_defect: null },
+  { time: "09:00", produced: 1380, defect_rate: 2.4, predicted_defect: null },
+  { time: "10:00", produced: 1450, defect_rate: 1.9, predicted_defect: null },
+  { time: "11:00", produced: 1310, defect_rate: 3.2, predicted_defect: null },
+  { time: "12:00", produced: 890, defect_rate: 2.8, predicted_defect: null },
+  { time: "13:00", produced: 1420, defect_rate: 2.5, predicted_defect: null },
+  { time: "14:00", produced: 1550, defect_rate: 2.2, predicted_defect: null },
+  { time: "15:00", produced: 1200, defect_rate: null, predicted_defect: 2.8 },
+  { time: "16:00", produced: 1100, defect_rate: null, predicted_defect: 3.1 },
+  { time: "17:00", produced: 1000, defect_rate: null, predicted_defect: 3.0 },
+];
+
+const MOCK_NG_LIST = [
+  { time: "14:59", board_id: "B-0021", cls: "short", conf: 0.97 },
+  { time: "14:58", board_id: "B-0019", cls: "open", conf: 0.91 },
+  { time: "14:57", board_id: "B-0018", cls: "short", conf: 0.94 },
+  { time: "14:56", board_id: "C-0033", cls: "spur", conf: 0.85 },
+  { time: "14:55", board_id: "A-0044", cls: "mousebite", conf: 0.88 },
+  { time: "14:54", board_id: "B-0017", cls: "short", conf: 0.96 },
+  { time: "14:53", board_id: "A-0042", cls: "pin_hole", conf: 0.79 },
+];
+
+const MOCK_SUMMARY = {
+  total_produced: 13200,
+  total_plan: 20000,
+  achievement_rate: 66.0,
+  total_defects: 640,
+  defect_rate: 2.8,
+  predicted_defect_rate: 3.1,
+  lines_running: 2,
+  lines_down: 1,
+};
+
+async function fetchAll() {
+  return {
+    lines: MOCK_LINES,
+    defects: MOCK_DEFECTS,
+    hourly: MOCK_HOURLY,
+    ngList: MOCK_NG_LIST,
+    summary: MOCK_SUMMARY,
+  };
+}
+
+==================================================
+FILE: nginx/html/web_dashboard.html
+==================================================
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>PCB Factory Dashboard</title>
+  <meta name="description" content="스마트 팩토리 PCB 불량 검출 실시간 대시보드" />
+
+  <!-- 구글 폰트: DM Mono(데이터), DM Sans(레이블), Orbitron(홍보) -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;700&family=DM+Sans:wght@400;600;800&family=Orbitron:wght@700;900&display=swap" rel="stylesheet" />
+
+  <!-- Chart.js CDN — 바차트·라인차트·파이차트 렌더링 -->
+  <link rel="stylesheet" href="css/wed_dashboard/dashboard_style.css">
+</head>
+<body>
+
+  <!-- ── 탭 네비게이션 바 (상단 sticky) ── -->
+  <nav id="tab-bar">
+    <div id="brand">PCB FACTORY</div>
+
+    <!-- 탭 버튼: data-tab 속성으로 화면 구분 -->
+    <button class="tab-btn" data-tab="worker"  id="tab-worker">
+      <span class="tab-emoji">👷</span>
+      <span class="tab-label">작업자</span>
+    </button>
+    <button class="tab-btn" data-tab="qa"      id="tab-qa">
+      <span class="tab-emoji">🔬</span>
+      <span class="tab-label">품질관리자</span>
+    </button>
+    <button class="tab-btn active" data-tab="manager" id="tab-manager">
+      <span class="tab-emoji">📊</span>
+      <span class="tab-label">관리자</span>
+    </button>
+    <button class="tab-btn" data-tab="promo"   id="tab-promo">
+      <span class="tab-emoji">📺</span>
+      <span class="tab-label">홍보</span>
+    </button>
+
+    <!-- LIVE 인디케이터 -->
+    <div id="live-indicator">
+      <div id="live-dot"></div>
+      <span id="live-text">LIVE</span>
+    </div>
+  </nav>
+
+  <!-- ── 콘텐츠 영역: JS가 각 화면을 여기에 렌더링 ── -->
+  <main id="content">
+    <!-- 로딩 스피너 (API 응답 전까지 표시) -->
+    <div id="loading">
+      <div class="spinner"></div>
+      <p>데이터 로딩 중...</p>
+    </div>
+  </main>
+
+  <!-- Chart.js (번들) -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.2/dist/chart.umd.min.js"></script>
+
+  <!-- 앱 모듈 로드 순서 중요: api → charts → app -->
+  <script src="js/wed_dashboard/dashboard_api.js"></script>
+  <script src="js/wed_dashboard/dashboard_charts.js"></script>
+  <script src="js/wed_dashboard/dashboard_app.js"></script>
+</body>
+</html>
+
+
+==================================================
+FILE: nginx/html/css/wed_dashboard/dashboard_style.css
+==================================================
+/*
+ * style.css — PCB Dashboard 전체 스타일
+ * ──────────────────────────────────────────────────────────
+ * 디자인 토큰은 :root CSS 변수로 관리 → 한 곳만 수정하면 전체 반영
+ * 반응형: Mobile(<768) / Tablet(768~1024) / Desktop(>1024)
+ */
+
+/* ── CSS 변수 (디자인 토큰) ─────────────────────────────── */
+:root {
+  --bg-app:    #080e18;
+  --bg-card:   #0c1520;
+  --bg-deep:   #0a111c;
+  --bg-bar:    #1e2d40;
+  --border:    #1a2840;
+  --border-md: #1e2d40;
+
+  --text-label: #4a5d7a;
+  --text-muted: #6b7fa3;
+  --text-body:  #a0b4cc;
+  --text-main:  #e2ecff;
+
+  --blue:   #4a9eff;
+  --cyan:   #22d3ee;
+  --green:  #22d3a0;
+  --yellow: #fbbf24;
+  --red:    #f87171;
+  --orange: #fb923c;
+  --purple: #a78bfa;
+  --lime:   #a3e635;
+
+  --font-mono: 'DM Mono', monospace;
+  --font-sans: 'DM Sans', sans-serif;
+  --font-orb:  'Orbitron', monospace;
+
+  --radius-card:  14px;
+  --radius-inner: 10px;
+}
+
+/* ── 리셋 & 기본 ────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  background: var(--bg-app);
+  color: var(--text-main);
+  font-family: var(--font-sans);
+  min-height: 100vh;
+  -webkit-tap-highlight-color: transparent; /* 모바일 탭 하이라이트 제거 */
+}
+
+::-webkit-scrollbar { width: 4px; height: 4px; }
+::-webkit-scrollbar-track { background: var(--bg-app); }
+::-webkit-scrollbar-thumb { background: var(--border-md); border-radius: 4px; }
+
+/* ── 탭 바 ──────────────────────────────────────────────── */
+#tab-bar {
+  display: flex;
+  align-items: stretch;
+  background: var(--bg-deep);
+  border-bottom: 1px solid var(--border-md);
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  height: 50px;
+}
+
+#brand {
+  display: flex;
+  align-items: center;
+  padding: 0 16px;
+  border-right: 1px solid var(--border-md);
+  margin-right: 4px;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-label);
+  letter-spacing: 1px;
+  white-space: nowrap;
+}
+
+/* 탭 버튼 공통 */
+.tab-btn {
+  flex: none;
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0 18px;
+  min-width: 100px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-label);
+  border-bottom: 2px solid transparent;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  transition: color 0.2s, border-color 0.2s;
+}
+
+/* 활성 탭 색상은 JS에서 --tab-color 변수를 동적으로 주입 */
+.tab-btn.active { color: var(--tab-color, var(--green)); border-bottom-color: var(--tab-color, var(--green)); }
+
+.tab-emoji { font-size: 16px; }
+.tab-label { font-size: 11px; }
+
+/* LIVE 인디케이터 */
+#live-indicator {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0 14px;
+}
+#live-dot {
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: var(--green);
+  box-shadow: 0 0 6px var(--green);
+  animation: pulse 2s infinite;
+}
+#live-text { color: var(--green); font-size: 11px; letter-spacing: 1px; }
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.4; }
+}
+
+/* ── 콘텐츠 영역 ────────────────────────────────────────── */
+#content { overflow-x: hidden; }
+
+/* ── 로딩 ────────────────────────────────────────────────── */
+#loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 60vh;
+  color: var(--text-label);
+  gap: 16px;
+}
+.spinner {
+  width: 40px; height: 40px;
+  border: 3px solid var(--border-md);
+  border-top-color: var(--green);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ── 공통 레이아웃 ──────────────────────────────────────── */
+.screen { padding: 20px; display: flex; flex-direction: column; gap: 14px; }
+
+/* 그리드 헬퍼 */
+.grid { display: grid; gap: 10px; }
+.grid-2 { grid-template-columns: repeat(2, 1fr); }
+.grid-3 { grid-template-columns: repeat(3, 1fr); }
+.grid-4 { grid-template-columns: repeat(4, 1fr); }
+.grid-5 { grid-template-columns: repeat(5, 1fr); }
+.grid-6 { grid-template-columns: repeat(6, 1fr); }
+.grid-chart { grid-template-columns: 1.4fr 1fr; gap: 14px; }
+
+/* ── 카드 ──────────────────────────────────────────────── */
+.card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  padding: 16px;
+}
+
+/* 섹션 제목 (소형 대문자) */
+.section-title {
+  color: var(--text-label);
+  font-size: 10px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  margin-bottom: 14px;
+  font-family: var(--font-sans);
+}
+
+/* ── KPI 카드 ──────────────────────────────────────────── */
+.kpi-card {
+  background: linear-gradient(135deg, #0f1923 60%, #131f2e);
+  border-radius: var(--radius-card);
+  padding: 16px 20px;
+  min-height: 90px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+}
+.kpi-label {
+  font-size: 10px;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  color: var(--text-label);
+  font-family: var(--font-sans);
+}
+.kpi-value {
+  font-size: 26px;
+  font-weight: 700;
+  font-family: var(--font-mono);
+  line-height: 1;
+  margin: 6px 0;
+}
+.kpi-sub { font-size: 11px; color: var(--text-label); }
+
+/* ── 경고 배너 ──────────────────────────────────────────── */
+.alert-banner {
+  background: linear-gradient(90deg, #2d0a00, #3d1500);
+  border: 1px solid var(--red);
+  border-radius: var(--radius-inner);
+  padding: 10px 16px;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  box-shadow: 0 0 20px #f8717144;
+}
+.alert-icon { font-size: 20px; flex-shrink: 0; }
+.alert-title { color: #fca5a5; font-size: 13px; font-weight: 700; }
+.alert-msg   { color: var(--red); font-size: 12px; margin-top: 2px; }
+.alert-time  { color: var(--red); font-size: 11px; flex-shrink: 0; margin-left: auto; }
+
+/* ── Defect 바 리스트 ───────────────────────────────────── */
+.defect-bar-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 9px;
+}
+.defect-bar-label { width: 105px; font-size: 11px; color: var(--text-muted); text-align: right; flex-shrink: 0; }
+.defect-bar-track { flex: 1; height: 18px; background: var(--bg-bar); border-radius: 4px; overflow: hidden; }
+.defect-bar-fill  { height: 100%; border-radius: 4px; transition: width 1.2s ease; }
+.defect-bar-count { width: 28px; font-size: 13px; font-weight: 700; text-align: right; flex-shrink: 0; }
+
+/* ── NG 로그 리스트 ─────────────────────────────────────── */
+.ng-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 0;
+  border-bottom: 1px solid var(--border);
+}
+.ng-time  { font-size: 11px; color: var(--text-label); font-family: var(--font-mono); flex-shrink: 0; }
+.ng-line  { font-size: 11px; color: #506070; flex-shrink: 0; }
+.ng-badge {
+  border-radius: 5px;
+  padding: 1px 8px;
+  font-size: 11px;
+  font-family: var(--font-mono);
+  flex: 1;
+}
+.ng-conf  { font-size: 11px; color: var(--text-label); flex-shrink: 0; }
+.ng-tag   { font-size: 11px; font-weight: 700; color: var(--red); flex-shrink: 0; }
+
+/* ── 라인 현황 카드 ─────────────────────────────────────── */
+.line-card {
+  background: var(--bg-deep);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-inner);
+  padding: 11px 13px;
+  margin-bottom: 10px;
+}
+.line-badge {
+  width: 40px; height: 40px;
+  border-radius: 8px;
+  display: flex; align-items: center; justify-content: center;
+  font-weight: 800; font-size: 13px;
+  font-family: var(--font-mono);
+  flex-shrink: 0;
+}
+.line-info { flex: 1; min-width: 0; }
+.line-produced { font-size: 14px; font-weight: 700; font-family: var(--font-mono); color: #c0d0e8; }
+.line-produced small { font-size: 11px; color: var(--text-label); }
+.line-status-badge { border-radius: 5px; padding: 2px 9px; font-size: 11px; font-weight: 700; }
+.progress-track { flex: 1; height: 5px; background: var(--bg-bar); border-radius: 4px; overflow: hidden; }
+.progress-fill  { height: 100%; border-radius: 4px; transition: width 1s ease; }
+
+/* ── 리스크 게이지 ──────────────────────────────────────── */
+.risk-gauge-wrap {
+  background: var(--bg-deep);
+  border-radius: 12px;
+  padding: 14px;
+  text-align: center;
+}
+.risk-label { color: var(--text-label); font-size: 10px; margin-bottom: 10px; font-family: var(--font-sans); }
+.risk-donut {
+  border-radius: 50%;
+  margin: 0 auto 10px;
+  display: flex; align-items: center; justify-content: center;
+}
+.risk-inner {
+  border-radius: 50%;
+  background: var(--bg-deep);
+  display: flex; align-items: center; justify-content: center;
+}
+.risk-pct { font-size: 13px; font-weight: 700; font-family: var(--font-mono); }
+.risk-count { font-size: 12px; color: var(--text-muted); }
+
+/* ── NG 테이블 ──────────────────────────────────────────── */
+.ng-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.ng-table th {
+  color: var(--text-label);
+  text-align: left;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border-md);
+  font-weight: 600;
+  font-size: 11px;
+}
+.ng-table td { padding: 8px 10px; border-bottom: 1px solid #1a2535; }
+.ng-table .td-time { color: var(--text-label); font-family: var(--font-mono); }
+.ng-table .td-id   { color: var(--text-body);  font-family: var(--font-mono); }
+.ng-table .td-conf { color: #c0d0e8; font-family: var(--font-mono); }
+
+/* ── 차트 컨테이너 ──────────────────────────────────────── */
+.chart-wrap { position: relative; width: 100%; }
+
+/* ── 홍보 스크린 전용 ───────────────────────────────────── */
+.promo-screen {
+  min-height: calc(100vh - 50px);
+  padding: 28px;
+  background: radial-gradient(ellipse at 20% 20%, #001a2c 0%, #000d18 60%, #0a0014 100%);
+}
+.promo-header { text-align: center; margin-bottom: 30px; }
+.promo-subtitle { color: var(--cyan); font-size: 10px; letter-spacing: 4px; text-transform: uppercase; margin-bottom: 6px; }
+.promo-title { font-size: 26px; font-weight: 900; color: var(--text-main); letter-spacing: 1px; font-family: var(--font-orb); }
+.promo-clock { color: var(--cyan); font-size: 28px; font-weight: 700; margin-top: 6px; font-family: var(--font-orb); }
+
+.promo-kpi-card {
+  background: rgba(255,255,255,0.04);
+  border-radius: var(--radius-card);
+  padding: 22px 20px;
+  text-align: center;
+}
+.promo-kpi-label { color: var(--text-label); font-size: 9px; letter-spacing: 2px; text-transform: uppercase; margin-bottom: 8px; }
+.promo-kpi-value { font-weight: 900; font-family: var(--font-orb); line-height: 1; font-size: 36px; }
+
+.top-defect-panel {
+  background: rgba(255,255,255,0.03);
+  border-radius: 16px;
+  padding: 24px;
+  text-align: center;
+  transition: border-color 0.5s, box-shadow 0.5s;
+}
+.top-defect-rank {
+  display: inline-block;
+  border-radius: 10px;
+  padding: 4px 16px;
+  margin-bottom: 10px;
+  color: var(--text-label);
+  font-size: 12px;
+}
+.top-defect-name {
+  font-size: 40px;
+  font-weight: 900;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  font-family: var(--font-orb);
+}
+.top-defect-count { color: var(--text-muted); font-size: 15px; margin-top: 8px; }
+.top-defect-dots  { display: flex; justify-content: center; gap: 8px; margin-top: 14px; }
+.dot {
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  background: var(--bg-bar);
+  transition: background 0.3s;
+}
+.dot.active { background: var(--dot-color); }
+
+.promo-chart-panel {
+  background: rgba(255,255,255,0.03);
+  border: 1px solid var(--border-md);
+  border-radius: 16px;
+  padding: 24px;
+}
+
+/* ── 반응형 ─────────────────────────────────────────────── */
+@media (max-width: 767px) {
+  #brand { display: none; }
+
+  .tab-btn {
+    flex: 1;
+    padding: 0 4px;
+    min-width: 0;
+    font-size: 11px;
+  }
+  .tab-emoji { font-size: 20px; }
+  .tab-label { font-size: 9px; }
+  #live-text { display: none; }
+
+  .screen { padding: 14px; }
+
+  .grid-4, .grid-5, .grid-6 { grid-template-columns: repeat(2, 1fr); }
+  .grid-3 { grid-template-columns: repeat(2, 1fr); }
+  .grid-chart { grid-template-columns: 1fr; }
+
+  .kpi-value { font-size: 28px; }
+  .kpi-card  { min-height: 100px; padding: 18px 16px; }
+
+  .defect-bar-label { width: 90px; }
+
+  .risk-donut  { width: 52px !important; height: 52px !important; }
+  .risk-inner  { width: 38px !important; height: 38px !important; }
+  .risk-pct    { font-size: 12px !important; }
+
+  .promo-screen { padding: 16px; }
+  .promo-title  { font-size: 20px; }
+  .promo-clock  { font-size: 22px; }
+  .promo-kpi-value { font-size: 28px; }
+  .promo-kpi-card  { padding: 16px 14px; }
+  .top-defect-name { font-size: 32px; }
+  .top-defect-panel, .promo-chart-panel { padding: 18px; }
+
+  .line-badge { width: 44px !important; height: 44px !important; }
+}
+
+@media (min-width: 768px) and (max-width: 1023px) {
+  .grid-5 { grid-template-columns: repeat(3, 1fr); }
+  .grid-6 { grid-template-columns: repeat(3, 1fr); }
+}
+
+
+==================================================
+FILE: server_api/src/modules/dashboard/router.py
+==================================================
+from fastapi import APIRouter
+
+from src.modules.dashboard.service import dashboard_status_placeholder
+
+router = APIRouter(prefix="/dashboard", tags=["dashboard"])
+
+
+@router.get("/status")
+def dashboard_status():
+    return dashboard_status_placeholder()
+
+
+==================================================
+FILE: server_api/src/modules/dashboard/service.py
+==================================================
+def dashboard_status_placeholder() -> dict:
+    return {
+        "module": "dashboard",
+        "message": "Dashboard skeleton is ready. Wire feature endpoints here.",
+    }
+
+

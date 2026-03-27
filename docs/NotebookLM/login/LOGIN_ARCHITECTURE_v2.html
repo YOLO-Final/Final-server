@@ -1,0 +1,274 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=1920">
+  <title>로그인 모듈 아키텍처</title>
+  <style>
+    body { margin: 0; padding: 0; background: #fff; }
+    svg { display: block; }
+  </style>
+</head>
+<body>
+<svg xmlns="http://www.w3.org/2000/svg"
+     width="1920" height="1080"
+     viewBox="0 0 1920 1080"
+     font-family="'Malgun Gothic','Apple SD Gothic Neo','Noto Sans KR',sans-serif">
+
+  <defs>
+    <marker id="arr" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+      <polygon points="0 0,10 3.5,0 7" fill="#555"/>
+    </marker>
+    <marker id="arr-purple" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+      <polygon points="0 0,10 3.5,0 7" fill="#7B5EA7"/>
+    </marker>
+  </defs>
+
+  <!-- White background -->
+  <rect width="1920" height="1080" fill="white"/>
+
+  <!-- ═══════════════════════════════════════════════════════════════
+       TITLE
+  ════════════════════════════════════════════════════════════════ -->
+  <text x="960" y="40" text-anchor="middle" font-size="22" font-weight="bold" fill="#222">로그인 모듈 아키텍처</text>
+
+  <!-- ═══════════════════════════════════════════════════════════════
+       USER ICON
+  ════════════════════════════════════════════════════════════════ -->
+  <!-- head circle -->
+  <circle cx="960" cy="80" r="18" fill="#888" stroke="#555" stroke-width="1.5"/>
+  <!-- body path -->
+  <path d="M930,115 Q930,100 960,100 Q990,100 990,115 L990,128 L930,128 Z" fill="#888" stroke="#555" stroke-width="1.5"/>
+  <text x="960" y="130" text-anchor="middle" font-size="12" fill="#444">사용자 (작업자)</text>
+
+  <!-- Arrow: User → Browser -->
+  <line x1="960" y1="132" x2="960" y2="148" stroke="#555" stroke-width="2" marker-end="url(#arr)"/>
+
+  <!-- ═══════════════════════════════════════════════════════════════
+       BROWSER LAYER  (x=50, y=150, w=1820, h=250)
+  ════════════════════════════════════════════════════════════════ -->
+  <rect x="50" y="150" width="1820" height="250" rx="6"
+        fill="#FFF8F0" stroke="#CC7722" stroke-width="2" stroke-dasharray="10,5"/>
+
+  <!-- Browser layer label tag -->
+  <rect x="60" y="145" width="110" height="20" rx="3" fill="#CC7722"/>
+  <text x="115" y="159" text-anchor="middle" font-size="11" fill="white" font-weight="bold">브라우저 영역</text>
+
+  <!-- ── LOGIN SUB-GROUP (x=70, y=172, w=855, h=190) ── -->
+  <rect x="70" y="172" width="855" height="190" rx="4"
+        fill="none" stroke="#CC7722" stroke-width="1" stroke-dasharray="6,3" opacity="0.6"/>
+  <text x="78" y="184" font-size="11" fill="#888">로그인 탭 (login.html / login.js)</text>
+
+  <!-- PASSWORD TAB (x=85, y=188, w=255, h=168) -->
+  <rect x="85" y="188" width="255" height="168" rx="4" fill="#E8943A"/>
+  <text x="212" y="210" text-anchor="middle" font-size="13" font-weight="bold" fill="white">비밀번호 탭</text>
+  <text x="212" y="228" text-anchor="middle" font-size="11" fill="white">#login-form submit</text>
+  <text x="212" y="244" text-anchor="middle" font-size="11" fill="white">employee_no · password</text>
+  <line x1="95" y1="252" x2="330" y2="252" stroke="white" stroke-width="0.8" opacity="0.5"/>
+  <text x="212" y="268" text-anchor="middle" font-size="10" fill="#FFE8CC">→ POST /api/v1/auth/login</text>
+  <text x="212" y="284" text-anchor="middle" font-size="10" fill="#FFE8CC">→ storeAuthSession()</text>
+  <text x="212" y="300" text-anchor="middle" font-size="10" fill="#FFE8CC">→ /auto.html 이동</text>
+
+  <!-- FACE ID TAB (x=355, y=188, w=555, h=168) -->
+  <rect x="355" y="188" width="555" height="168" rx="4" fill="#D4782A"/>
+  <text x="632" y="210" text-anchor="middle" font-size="13" font-weight="bold" fill="white">Face ID 탭</text>
+  <text x="632" y="228" text-anchor="middle" font-size="11" fill="white">카메라 자동 재시도 루프 (setInterval 1.8s)</text>
+  <text x="632" y="244" text-anchor="middle" font-size="11" fill="white">canvas.toDataURL → image_base64 캡처</text>
+  <line x1="365" y1="252" x2="900" y2="252" stroke="white" stroke-width="0.8" opacity="0.5"/>
+  <text x="632" y="268" text-anchor="middle" font-size="10" fill="#FFE8CC">→ POST /api/v1/auth/login/face</text>
+  <text x="632" y="284" text-anchor="middle" font-size="10" fill="#FFE8CC">→ storeAuthSession()</text>
+  <text x="632" y="300" text-anchor="middle" font-size="10" fill="#FFE8CC">→ /auto.html 이동</text>
+
+  <!-- ── SESSION BRIDGE SUB-GROUP (x=940, y=172, w=920, h=190) ── -->
+  <rect x="940" y="172" width="920" height="190" rx="4"
+        fill="none" stroke="#CC7722" stroke-width="1" stroke-dasharray="6,3" opacity="0.6"/>
+  <text x="948" y="184" font-size="11" fill="#888">세션 관리 (dashboard.js)</text>
+
+  <!-- SESSION BRIDGE BOX (x=955, y=188, w=890, h=168) -->
+  <rect x="955" y="188" width="890" height="168" rx="4" fill="#C86820"/>
+  <text x="1400" y="210" text-anchor="middle" font-size="13" font-weight="bold" fill="white">세션 브리지 (dashboard.js)</text>
+  <text x="1400" y="228" text-anchor="middle" font-size="11" fill="white">authFetch() → 401 → refreshAccessToken() → 재요청</text>
+  <text x="1400" y="244" text-anchor="middle" font-size="11" fill="white">실패 시 → clearAuthSession() → /login.html 이동</text>
+  <text x="1400" y="260" text-anchor="middle" font-size="11" fill="white">로그아웃: localStorage 삭제 → /login.html  (서버 API 미호출)</text>
+  <line x1="965" y1="270" x2="1835" y2="270" stroke="white" stroke-width="0.8" opacity="0.5"/>
+  <text x="1400" y="288" text-anchor="middle" font-size="10" fill="#FFE8CC">GET /api/v1/auth/users/{employee_no}  |  POST /api/v1/auth/refresh</text>
+
+  <!-- LOCALSTORAGE STRIP (x=70, y=370, w=1800, h=24) -->
+  <rect x="70" y="370" width="1800" height="24" rx="3" fill="#D4791E"/>
+  <text x="970" y="386" text-anchor="middle" font-size="11" fill="white" font-weight="bold">
+    localStorage  —  rss-auth  |  rss-user-employee-no  |  rss-access-token  |  rss-refresh-token
+  </text>
+
+  <!-- Arrow: Browser → Nginx -->
+  <line x1="960" y1="402" x2="960" y2="422" stroke="#555" stroke-width="2" marker-end="url(#arr)"/>
+  <text x="975" y="415" font-size="11" fill="#444">HTTP Fetch</text>
+
+  <!-- ═══════════════════════════════════════════════════════════════
+       NGINX  (x=810, y=425, w=300, h=55)
+  ════════════════════════════════════════════════════════════════ -->
+  <rect x="810" y="425" width="300" height="55" rx="4" fill="#5B8FBF"/>
+  <text x="960" y="448" text-anchor="middle" font-size="13" font-weight="bold" fill="white">Nginx</text>
+  <text x="960" y="468" text-anchor="middle" font-size="11" fill="white">리버스 프록시  /api → FastAPI:8000</text>
+
+  <!-- Arrow: Nginx → FastAPI -->
+  <line x1="960" y1="482" x2="960" y2="502" stroke="#555" stroke-width="2" marker-end="url(#arr)"/>
+
+  <!-- ═══════════════════════════════════════════════════════════════
+       FASTAPI LAYER  (x=50, y=505, w=1820, h=380)
+  ════════════════════════════════════════════════════════════════ -->
+  <rect x="50" y="505" width="1820" height="380" rx="6"
+        fill="#EEF2F8" stroke="#2C4C7C" stroke-width="2" stroke-dasharray="10,5"/>
+
+  <!-- FastAPI layer label tag -->
+  <rect x="60" y="500" width="140" height="20" rx="3" fill="#2C4C7C"/>
+  <text x="130" y="514" text-anchor="middle" font-size="11" fill="white" font-weight="bold">FastAPI 서버 영역</text>
+
+  <!-- ── AUTH ROUTER BOX (x=70, y=528, w=330, h=340) ── -->
+  <rect x="70" y="528" width="330" height="340" rx="4"
+        fill="none" stroke="#2C4C7C" stroke-width="1.5" stroke-dasharray="6,3"/>
+  <text x="235" y="545" text-anchor="middle" font-size="12" font-weight="bold" fill="#2C4C7C">Auth Router (router.py)</text>
+
+  <!-- Endpoint 1: POST /login -->
+  <rect x="75" y="550" width="305" height="52" rx="4" fill="#2C4C7C"/>
+  <text x="227" y="570" text-anchor="middle" font-size="12" font-weight="bold" fill="white">POST /api/v1/auth/login</text>
+  <text x="227" y="588" text-anchor="middle" font-size="10" fill="#AAC4E8">비밀번호 로그인</text>
+
+  <!-- Endpoint 2: POST /login/face -->
+  <rect x="75" y="608" width="305" height="52" rx="4" fill="#2C4C7C"/>
+  <text x="227" y="628" text-anchor="middle" font-size="12" font-weight="bold" fill="white">POST /api/v1/auth/login/face</text>
+  <text x="227" y="646" text-anchor="middle" font-size="10" fill="#AAC4E8">Face ID 로그인</text>
+
+  <!-- Endpoint 3: POST /refresh -->
+  <rect x="75" y="666" width="305" height="52" rx="4" fill="#2C4C7C"/>
+  <text x="227" y="686" text-anchor="middle" font-size="12" font-weight="bold" fill="white">POST /api/v1/auth/refresh</text>
+  <text x="227" y="704" text-anchor="middle" font-size="10" fill="#AAC4E8">토큰 갱신</text>
+
+  <!-- Endpoint 4: GET /users/{emp_no} -->
+  <rect x="75" y="724" width="305" height="52" rx="4" fill="#2C4C7C"/>
+  <text x="227" y="744" text-anchor="middle" font-size="12" font-weight="bold" fill="white">GET /api/v1/auth/users/{emp_no}</text>
+  <text x="227" y="762" text-anchor="middle" font-size="10" fill="#AAC4E8">사용자명 조회</text>
+
+  <!-- Endpoint 5: POST /logout (disabled) -->
+  <rect x="75" y="782" width="305" height="52" rx="4" fill="#1A2E4C" opacity="0.55"/>
+  <text x="227" y="802" text-anchor="middle" font-size="12" font-weight="bold" fill="#888">POST /api/v1/auth/logout</text>
+  <text x="227" y="820" text-anchor="middle" font-size="10" fill="#888">서버 존재 · FE 미호출</text>
+
+  <!-- ── AUTH SERVICE BOX (x=415, y=528, w=560, h=340) ── -->
+  <rect x="415" y="528" width="560" height="340" rx="4"
+        fill="none" stroke="#2C4C7C" stroke-width="1.5" stroke-dasharray="6,3"/>
+  <text x="695" y="545" text-anchor="middle" font-size="12" font-weight="bold" fill="#2C4C7C">Auth Service (service.py)</text>
+
+  <!-- Section 1: 비밀번호 검증 -->
+  <rect x="420" y="550" width="535" height="90" rx="4" fill="#2C4C7C"/>
+  <text x="687" y="568" text-anchor="middle" font-size="11" font-weight="bold" fill="white">비밀번호 검증</text>
+  <text x="687" y="584" text-anchor="middle" font-size="10" fill="white">SHA-256(구형) 판별 → bcrypt 검증 → 성공 시 자동 마이그레이션</text>
+  <text x="687" y="599" text-anchor="middle" font-size="10" fill="white">5회 실패 → login_fail_count ↑ → id_locked = True</text>
+  <text x="687" y="616" text-anchor="middle" font-size="9" fill="#AAC4E8">login_with_password()  ·  last_login 갱신  ·  token_version 관리</text>
+
+  <!-- Section 2: Face ID 매칭 -->
+  <rect x="420" y="646" width="535" height="90" rx="4" fill="#2C4C7C"/>
+  <text x="687" y="664" text-anchor="middle" font-size="11" font-weight="bold" fill="white">Face ID 매칭</text>
+  <text x="687" y="680" text-anchor="middle" font-size="10" fill="white">face_login_with_matching()  ·  1:1 / 1:N cosine similarity</text>
+  <text x="687" y="696" text-anchor="middle" font-size="10" fill="white">임계값 ≥ 0.30  →  id_active / id_locked 재확인  →  JWT 발급</text>
+  <text x="687" y="712" text-anchor="middle" font-size="9" fill="#AAC4E8">employee_no 있음: 1건 조회  /  없음: face_embedding_table 전체 순회</text>
+
+  <!-- Section 3: 토큰 갱신 -->
+  <rect x="420" y="742" width="535" height="90" rx="4" fill="#1A3A6C"/>
+  <text x="687" y="760" text-anchor="middle" font-size="11" font-weight="bold" fill="white">토큰 갱신</text>
+  <text x="687" y="776" text-anchor="middle" font-size="10" fill="white">refresh_access_token()  →  decode_token()으로 검증</text>
+  <text x="687" y="792" text-anchor="middle" font-size="10" fill="white">token_version 일치 확인  →  새 access token 발급</text>
+  <text x="687" y="810" text-anchor="middle" font-size="9" fill="#AAC4E8">불일치 시 → 401 → 세션 만료</text>
+
+  <!-- ── JWT.PY BOX (x=990, y=528, w=325, h=340) ── -->
+  <rect x="990" y="528" width="325" height="340" rx="4"
+        fill="none" stroke="#3A6095" stroke-width="1.5" stroke-dasharray="6,3"/>
+  <text x="1152" y="545" text-anchor="middle" font-size="12" font-weight="bold" fill="#3A6095">jwt.py</text>
+
+  <!-- Section 1: 토큰 생성/복호화 -->
+  <rect x="995" y="550" width="300" height="105" rx="4" fill="#3A6095"/>
+  <text x="1145" y="568" text-anchor="middle" font-size="11" font-weight="bold" fill="white">토큰 생성 / 복호화</text>
+  <text x="1145" y="585" text-anchor="middle" font-size="10" fill="white">create_access_token()  ·  create_refresh_token()</text>
+  <text x="1145" y="601" text-anchor="middle" font-size="10" fill="white">decode_token()</text>
+  <text x="1145" y="620" text-anchor="middle" font-size="9" fill="#C8D8F0">SECRET_KEY 기동 시 검증  ·  만료시간 정책</text>
+
+  <!-- Section 2: 인증 게이트 -->
+  <rect x="995" y="661" width="300" height="135" rx="4" fill="#2C5080"/>
+  <text x="1145" y="679" text-anchor="middle" font-size="11" font-weight="bold" fill="white">인증 게이트</text>
+  <text x="1145" y="696" text-anchor="middle" font-size="10" fill="white">get_current_user()</text>
+  <text x="1145" y="712" text-anchor="middle" font-size="10" fill="white">· access 타입 검증</text>
+  <text x="1145" y="728" text-anchor="middle" font-size="10" fill="white">· DB 사용자 조회 (비활성/잠금 체크)</text>
+  <text x="1145" y="744" text-anchor="middle" font-size="10" fill="white">· token_version 불일치 차단</text>
+  <text x="1145" y="763" text-anchor="middle" font-size="9" fill="#C8D8F0">FastAPI 의존성 주입으로 보호 API에 적용</text>
+
+  <!-- ── VISION ENGINE BOX (x=1330, y=528, w=530, h=210) ── -->
+  <rect x="1330" y="528" width="530" height="210" rx="4"
+        fill="none" stroke="#7B5EA7" stroke-width="1.5" stroke-dasharray="6,3"/>
+  <text x="1595" y="545" text-anchor="middle" font-size="12" font-weight="bold" fill="#7B5EA7">Vision Engine (vision/service.py)</text>
+
+  <!-- Section 1: 임베딩 추출 -->
+  <rect x="1335" y="550" width="505" height="75" rx="4" fill="#7B5EA7"/>
+  <text x="1587" y="568" text-anchor="middle" font-size="11" font-weight="bold" fill="white">임베딩 추출</text>
+  <text x="1587" y="585" text-anchor="middle" font-size="10" fill="white">extract_face_embedding()</text>
+  <text x="1587" y="601" text-anchor="middle" font-size="10" fill="white">Base64 디코딩 → InsightFace → 임베딩 벡터 반환</text>
+
+  <!-- Section 2: 유사도 비교 -->
+  <rect x="1335" y="631" width="505" height="85" rx="4" fill="#6040A0"/>
+  <text x="1587" y="649" text-anchor="middle" font-size="11" font-weight="bold" fill="white">유사도 비교</text>
+  <text x="1587" y="666" text-anchor="middle" font-size="10" fill="white">_cosine_similarity()  임계값 ≥ 0.30</text>
+  <text x="1587" y="682" text-anchor="middle" font-size="10" fill="white">401: 불일치  ·  404: 미등록  ·  422: 이미지 오류  ·  503: 엔진 준비 실패</text>
+
+  <!-- ═══════════════════════════════════════════════════════════════
+       ARROWS INSIDE FASTAPI
+  ════════════════════════════════════════════════════════════════ -->
+
+  <!-- Router → Service horizontal at y=695 -->
+  <line x1="378" y1="695" x2="413" y2="695" stroke="#555" stroke-width="2" marker-end="url(#arr)"/>
+
+  <!-- Service → jwt.py horizontal at y=695 -->
+  <line x1="957" y1="695" x2="988" y2="695" stroke="#555" stroke-width="2" marker-end="url(#arr)"/>
+
+  <!-- Service → Vision (face only) dashed purple at y=735 -->
+  <line x1="957" y1="735" x2="1328" y2="735"
+        stroke="#7B5EA7" stroke-width="1.5" stroke-dasharray="5,3" marker-end="url(#arr-purple)"/>
+  <text x="1140" y="728" text-anchor="middle" font-size="10" fill="#7B5EA7">Face ID 로그인 시</text>
+
+  <!-- ═══════════════════════════════════════════════════════════════
+       ARROWS: FastAPI → DB
+  ════════════════════════════════════════════════════════════════ -->
+
+  <!-- Service → DB vertical at x=695 -->
+  <line x1="695" y1="870" x2="695" y2="937" stroke="#555" stroke-width="2" marker-end="url(#arr)"/>
+  <text x="710" y="908" font-size="11" fill="#444">ORM</text>
+
+  <!-- jwt.py → DB vertical at x=1152 -->
+  <line x1="1152" y1="870" x2="1152" y2="937" stroke="#555" stroke-width="2" marker-end="url(#arr)"/>
+  <text x="1163" y="908" font-size="9" fill="#444">get_current_user</text>
+
+  <!-- Arrow: FastAPI → DB label -->
+  <text x="960" y="905" text-anchor="middle" font-size="11" fill="#444">SQLAlchemy ORM</text>
+
+  <!-- ═══════════════════════════════════════════════════════════════
+       DB LAYER  (x=50, y=920, w=1820, h=135)
+  ════════════════════════════════════════════════════════════════ -->
+  <rect x="50" y="920" width="1820" height="135" rx="6"
+        fill="#E8F5E9" stroke="#2E7D52" stroke-width="2" stroke-dasharray="10,5"/>
+
+  <!-- DB layer label tag -->
+  <rect x="60" y="915" width="115" height="20" rx="3" fill="#2E7D52"/>
+  <text x="117" y="929" text-anchor="middle" font-size="11" fill="white" font-weight="bold">PostgreSQL DB</text>
+
+  <!-- USER_TABLE (x=70, y=940, w=790, h=100) -->
+  <rect x="70" y="940" width="790" height="100" rx="4" fill="#2E7D52"/>
+  <text x="465" y="962" text-anchor="middle" font-size="13" font-weight="bold" fill="white">user_table</text>
+  <text x="465" y="982" text-anchor="middle" font-size="11" fill="white">employee_no  ·  password_hash  ·  id_active  ·  id_locked</text>
+  <text x="465" y="1000" text-anchor="middle" font-size="11" fill="white">login_fail_count  ·  token_version  ·  last_login  ·  name  ·  role</text>
+
+  <!-- FACE_EMBEDDING_TABLE (x=880, y=940, w=650, h=100) -->
+  <rect x="880" y="940" width="650" height="100" rx="4" fill="#1B5E38"/>
+  <text x="1205" y="962" text-anchor="middle" font-size="13" font-weight="bold" fill="white">face_embedding_table</text>
+  <text x="1205" y="982" text-anchor="middle" font-size="11" fill="white">employee_no  ·  embedding_json</text>
+  <text x="1205" y="1000" text-anchor="middle" font-size="11" fill="white">(실제 얼굴 매칭용 벡터  —  cosine 비교 대상)</text>
+
+</svg>
+</body>
+</html>

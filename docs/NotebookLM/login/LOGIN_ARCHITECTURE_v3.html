@@ -1,0 +1,546 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>로그인 모듈 아키텍처</title>
+  <style>
+    html, body { margin: 0; padding: 0; overflow: hidden; background: #fff; }
+    svg {
+      display: block;
+      width: 100vw;
+      height: 56.25vw;   /* 16:9 비율 유지 */
+      max-height: 100vh;
+      max-width: 177.78vh;
+      margin: auto;
+    }
+  </style>
+</head>
+<body>
+<svg xmlns="http://www.w3.org/2000/svg"
+     width="1920" height="1080"
+     viewBox="0 0 1920 1080"
+     font-family="'Malgun Gothic','Apple SD Gothic Neo','Noto Sans KR',sans-serif">
+
+  <defs>
+    <marker id="arr" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+      <polygon points="0 0,10 3.5,0 7" fill="#555"/>
+    </marker>
+    <marker id="arr-purple" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+      <polygon points="0 0,10 3.5,0 7" fill="#7B5EA7"/>
+    </marker>
+  </defs>
+
+  <!-- 배경 -->
+  <rect width="1920" height="1080" fill="white"/>
+
+  <!-- ══════════════════════════════════════════════════ -->
+  <!-- 제목                                               -->
+  <!-- ══════════════════════════════════════════════════ -->
+  <text x="960" y="40"
+        text-anchor="middle" font-size="32" font-weight="bold" fill="#1A1A2E">
+    로그인 모듈 아키텍처
+  </text>
+
+  <!-- ══════════════════════════════════════════════════ -->
+  <!-- 사용자 아이콘  (cy=78)                             -->
+  <!-- ══════════════════════════════════════════════════ -->
+  <circle cx="960" cy="78" r="17" fill="#999" stroke="#666" stroke-width="1.5"/>
+  <path d="M934,118 Q934,97 960,97 Q986,97 986,118 Z"
+        fill="#999" stroke="#666" stroke-width="1.5"/>
+  <text x="960" y="133"
+        text-anchor="middle" font-size="15" fill="#555">사용자 (작업자)</text>
+
+  <!-- 화살표: 사용자 → 브라우저 -->
+  <line x1="960" y1="135" x2="960" y2="147"
+        stroke="#555" stroke-width="2" marker-end="url(#arr)"/>
+
+  <!-- ══════════════════════════════════════════════════════════════ -->
+  <!-- 브라우저 영역   x=50  y=150  w=1820  h=268  (끝 y=418)        -->
+  <!-- ══════════════════════════════════════════════════════════════ -->
+  <rect x="50" y="150" width="1820" height="268" rx="6"
+        fill="#FFF8F0" stroke="#CC7722" stroke-width="2" stroke-dasharray="10,5"/>
+  <!-- 레이블 태그 -->
+  <rect x="60" y="143" width="120" height="24" rx="3" fill="#CC7722"/>
+  <text x="120" y="160"
+        text-anchor="middle" font-size="14" font-weight="bold" fill="white">
+    브라우저 영역
+  </text>
+
+  <!-- ── 로그인 탭 서브그룹  x=70 y=172 w=855 h=192 ── -->
+  <rect x="70" y="172" width="855" height="192" rx="4"
+        fill="none" stroke="#CC7722" stroke-width="1"
+        stroke-dasharray="5,3" opacity="0.7"/>
+  <text x="78" y="186" font-size="13" fill="#999">
+    로그인 화면 — login.html / login.js
+  </text>
+
+  <!-- 비밀번호 탭  x=85 y=188 w=255 h=168 -->
+  <rect x="85" y="188" width="255" height="168" rx="4" fill="#E8943A"/>
+  <text x="212" y="210"
+        text-anchor="middle" font-size="16" font-weight="bold" fill="white">
+    비밀번호 로그인
+  </text>
+  <line x1="93" y1="220" x2="332" y2="220"
+        stroke="white" stroke-width="0.7" opacity="0.5"/>
+  <text x="212" y="238"
+        text-anchor="middle" font-size="14" fill="white">
+    사원번호 · 비밀번호 입력
+  </text>
+  <text x="212" y="258"
+        text-anchor="middle" font-size="14" fill="white">
+    로그인 버튼 클릭 → 서버 전송
+  </text>
+  <line x1="93" y1="270" x2="332" y2="270"
+        stroke="white" stroke-width="0.7" opacity="0.4"/>
+  <text x="212" y="290"
+        text-anchor="middle" font-size="13" fill="#FFE8CC">
+    인증 성공
+  </text>
+  <text x="212" y="310"
+        text-anchor="middle" font-size="13" fill="#FFE8CC">
+    → 인증 정보 저장
+  </text>
+  <text x="212" y="330"
+        text-anchor="middle" font-size="13" fill="#FFE8CC">
+    → 대시보드 화면 이동
+  </text>
+
+  <!-- Face ID 탭  x=355 y=188 w=555 h=168 -->
+  <rect x="355" y="188" width="555" height="168" rx="4" fill="#D4782A"/>
+  <text x="632" y="210"
+        text-anchor="middle" font-size="16" font-weight="bold" fill="white">
+    Face ID 로그인
+  </text>
+  <line x1="363" y1="220" x2="902" y2="220"
+        stroke="white" stroke-width="0.7" opacity="0.5"/>
+  <text x="632" y="238"
+        text-anchor="middle" font-size="14" fill="white">
+    카메라 촬영 → 1.8초마다 자동 인증 시도
+  </text>
+  <text x="632" y="258"
+        text-anchor="middle" font-size="14" fill="white">
+    수동 버튼으로 즉시 시도 가능
+  </text>
+  <line x1="363" y1="270" x2="902" y2="270"
+        stroke="white" stroke-width="0.7" opacity="0.4"/>
+  <text x="632" y="290"
+        text-anchor="middle" font-size="13" fill="#FFE8CC">
+    인증 성공
+  </text>
+  <text x="632" y="310"
+        text-anchor="middle" font-size="13" fill="#FFE8CC">
+    → 인증 정보 저장
+  </text>
+  <text x="632" y="330"
+        text-anchor="middle" font-size="13" fill="#FFE8CC">
+    → 대시보드 화면 이동
+  </text>
+
+  <!-- ── 세션 브리지 서브그룹  x=940 y=172 w=920 h=192 ── -->
+  <rect x="940" y="172" width="920" height="192" rx="4"
+        fill="none" stroke="#CC7722" stroke-width="1"
+        stroke-dasharray="5,3" opacity="0.7"/>
+  <text x="948" y="186" font-size="13" fill="#999">
+    로그인 후 화면 — auto.html / dashboard.js
+  </text>
+
+  <!-- 세션 브리지 박스  x=955 y=188 w=890 h=168 -->
+  <rect x="955" y="188" width="890" height="168" rx="4" fill="#C86820"/>
+  <text x="1400" y="210"
+        text-anchor="middle" font-size="16" font-weight="bold" fill="white">
+    로그인 후 세션 관리
+  </text>
+  <line x1="963" y1="220" x2="1837" y2="220"
+        stroke="white" stroke-width="0.7" opacity="0.5"/>
+  <text x="1400" y="238"
+        text-anchor="middle" font-size="14" fill="white">
+    토큰 만료 시 자동 갱신 후 요청 재시도
+  </text>
+  <text x="1400" y="258"
+        text-anchor="middle" font-size="14" fill="white">
+    갱신 실패 → 인증 정보 삭제 → 로그인 화면 복귀
+  </text>
+  <line x1="963" y1="270" x2="1837" y2="270"
+        stroke="white" stroke-width="0.7" opacity="0.4"/>
+  <text x="1400" y="290"
+        text-anchor="middle" font-size="14" fill="#FFE8CC">
+    로그아웃: 인증 정보 삭제 → 로그인 화면 이동
+  </text>
+  <text x="1400" y="312"
+        text-anchor="middle" font-size="13" fill="#FFD090">
+    서버에 로그아웃 통보 없이 화면에서만 처리됨
+  </text>
+
+  <!-- 브라우저 저장소 스트립  x=70 y=368 w=1800 h=24 -->
+  <rect x="70" y="368" width="1800" height="24" rx="3" fill="#D4791E"/>
+  <text x="970" y="385"
+        text-anchor="middle" font-size="14" font-weight="bold" fill="white">
+    브라우저 저장소 — 사원번호 · 접근 토큰 · 갱신 토큰   (로그인 성공 후 저장)
+  </text>
+
+  <!-- 화살표: 브라우저 → Nginx -->
+  <line x1="960" y1="420" x2="960" y2="438"
+        stroke="#555" stroke-width="2.5" marker-end="url(#arr)"/>
+  <text x="975" y="433" font-size="14" fill="#444">HTTP 요청</text>
+
+  <!-- ══════════════════════════════════════════════════ -->
+  <!-- Nginx   x=810 y=441 w=300 h=55  (끝 y=496)       -->
+  <!-- ══════════════════════════════════════════════════ -->
+  <rect x="810" y="441" width="300" height="55" rx="4" fill="#5B8FBF"/>
+  <text x="960" y="464"
+        text-anchor="middle" font-size="16" font-weight="bold" fill="white">
+    Nginx
+  </text>
+  <text x="960" y="482"
+        text-anchor="middle" font-size="13" fill="#D0E8FF">
+    화면 요청 직접 처리 · API 요청은 서버로 전달
+  </text>
+
+  <!-- 화살표: Nginx → FastAPI -->
+  <line x1="960" y1="498" x2="960" y2="516"
+        stroke="#555" stroke-width="2.5" marker-end="url(#arr)"/>
+
+  <!-- ══════════════════════════════════════════════════════════════════ -->
+  <!-- FastAPI 서버 영역   x=50 y=519 w=1820 h=368  (끝 y=887)          -->
+  <!-- ══════════════════════════════════════════════════════════════════ -->
+  <rect x="50" y="519" width="1820" height="368" rx="6"
+        fill="#EEF2F8" stroke="#2C4C7C" stroke-width="2" stroke-dasharray="10,5"/>
+  <!-- 레이블 태그 -->
+  <rect x="60" y="512" width="160" height="24" rx="3" fill="#2C4C7C"/>
+  <text x="140" y="529"
+        text-anchor="middle" font-size="14" font-weight="bold" fill="white">
+    FastAPI 서버 영역
+  </text>
+
+  <!-- ── 요청 수신 창구 (Auth Router)  x=70 y=541 w=320 h=335 ── -->
+  <rect x="70" y="541" width="320" height="335" rx="4"
+        fill="none" stroke="#2C4C7C" stroke-width="1.5" stroke-dasharray="6,3"/>
+  <text x="230" y="558"
+        text-anchor="middle" font-size="14" font-weight="bold" fill="#2C4C7C">
+    요청 수신 창구 (router.py)
+  </text>
+
+  <!-- 박스 1: 비밀번호 로그인 요청  y=562 -->
+  <rect x="78" y="562" width="304" height="52" rx="3" fill="#2C4C7C"/>
+  <text x="230" y="582"
+        text-anchor="middle" font-size="14" font-weight="bold" fill="white">
+    비밀번호 로그인 요청
+  </text>
+  <text x="230" y="600"
+        text-anchor="middle" font-size="12" fill="#AAC4E8">
+    사원번호 · 비밀번호 수신
+  </text>
+
+  <!-- 박스 2: Face ID 로그인 요청  y=620 -->
+  <rect x="78" y="620" width="304" height="52" rx="3" fill="#2C4C7C"/>
+  <text x="230" y="640"
+        text-anchor="middle" font-size="14" font-weight="bold" fill="white">
+    Face ID 로그인 요청
+  </text>
+  <text x="230" y="658"
+        text-anchor="middle" font-size="12" fill="#AAC4E8">
+    얼굴 이미지 수신
+  </text>
+
+  <!-- 박스 3: 토큰 갱신 요청  y=678 -->
+  <rect x="78" y="678" width="304" height="52" rx="3" fill="#2C4C7C"/>
+  <text x="230" y="698"
+        text-anchor="middle" font-size="14" font-weight="bold" fill="white">
+    토큰 갱신 요청
+  </text>
+  <text x="230" y="716"
+        text-anchor="middle" font-size="12" fill="#AAC4E8">
+    갱신 토큰 수신
+  </text>
+
+  <!-- 박스 4: 사용자 정보 조회  y=736 -->
+  <rect x="78" y="736" width="304" height="52" rx="3" fill="#2C4C7C"/>
+  <text x="230" y="756"
+        text-anchor="middle" font-size="14" font-weight="bold" fill="white">
+    사용자 정보 조회
+  </text>
+  <text x="230" y="774"
+        text-anchor="middle" font-size="12" fill="#AAC4E8">
+    사원번호로 이름 조회
+  </text>
+
+  <!-- 박스 5: 로그아웃 (미사용, 흐리게)  y=794 -->
+  <rect x="78" y="794" width="304" height="52" rx="3" fill="#1A2E4C" opacity="0.5"/>
+  <text x="230" y="814"
+        text-anchor="middle" font-size="14" fill="#777">
+    로그아웃
+  </text>
+  <text x="230" y="832"
+        text-anchor="middle" font-size="12" fill="#666">
+    서버 기능 있음 · 현재 프론트 미사용
+  </text>
+
+  <!-- 화살표: 창구 → 인증 처리 -->
+  <line x1="392" y1="708" x2="408" y2="708"
+        stroke="#555" stroke-width="2.5" marker-end="url(#arr)"/>
+
+  <!-- ── 인증 처리 (Auth Service)  x=408 y=541 w=558 h=335 ── -->
+  <rect x="408" y="541" width="558" height="335" rx="4"
+        fill="none" stroke="#2C4C7C" stroke-width="1.5" stroke-dasharray="6,3"/>
+  <text x="687" y="558"
+        text-anchor="middle" font-size="14" font-weight="bold" fill="#2C4C7C">
+    인증 처리 (service.py)
+  </text>
+
+  <!-- 섹션 1: 비밀번호 검증  y=562 h=100 -->
+  <rect x="416" y="562" width="542" height="100" rx="3" fill="#2C4C7C"/>
+  <text x="687" y="582"
+        text-anchor="middle" font-size="15" font-weight="bold" fill="white">
+    비밀번호 검증
+  </text>
+  <line x1="424" y1="590" x2="950" y2="590"
+        stroke="white" stroke-width="0.7" opacity="0.4"/>
+  <text x="687" y="608"
+        text-anchor="middle" font-size="13" fill="white">
+    비밀번호 일치 여부 확인
+  </text>
+  <text x="687" y="626"
+        text-anchor="middle" font-size="13" fill="white">
+    5회 실패 시 계정 잠금
+  </text>
+  <text x="687" y="645"
+        text-anchor="middle" font-size="12" fill="#AAC4E8">
+    구형 비밀번호 형식도 자동 호환 처리
+  </text>
+
+  <!-- 섹션 2: Face ID 매칭  y=668 h=100 -->
+  <rect x="416" y="668" width="542" height="100" rx="3" fill="#2C4C7C"/>
+  <text x="687" y="688"
+        text-anchor="middle" font-size="15" font-weight="bold" fill="white">
+    Face ID 매칭
+  </text>
+  <line x1="424" y1="696" x2="950" y2="696"
+        stroke="white" stroke-width="0.7" opacity="0.4"/>
+  <text x="687" y="714"
+        text-anchor="middle" font-size="13" fill="white">
+    촬영 얼굴 vs 등록 얼굴 비교
+  </text>
+  <text x="687" y="732"
+        text-anchor="middle" font-size="13" fill="white">
+    기준값 0.30 이상 시 인증 통과
+  </text>
+  <text x="687" y="750"
+        text-anchor="middle" font-size="12" fill="#AAC4E8">
+    1명 지정 비교 또는 전체 대상 비교
+  </text>
+
+  <!-- 섹션 3: 토큰 갱신  y=774 h=94 -->
+  <rect x="416" y="774" width="542" height="94" rx="3" fill="#1A3A6C"/>
+  <text x="687" y="794"
+        text-anchor="middle" font-size="15" font-weight="bold" fill="white">
+    토큰 갱신 처리
+  </text>
+  <line x1="424" y1="802" x2="950" y2="802"
+        stroke="white" stroke-width="0.7" opacity="0.4"/>
+  <text x="687" y="820"
+        text-anchor="middle" font-size="13" fill="white">
+    기존 토큰 유효성 확인
+  </text>
+  <text x="687" y="840"
+        text-anchor="middle" font-size="13" fill="white">
+    유효하면 새 접근 토큰 발급
+  </text>
+
+  <!-- 화살표: 인증 처리 → 토큰 관리 -->
+  <line x1="968" y1="708" x2="984" y2="708"
+        stroke="#555" stroke-width="2.5" marker-end="url(#arr)"/>
+
+  <!-- 화살표: 인증 처리 → 얼굴 인식 엔진 (점선, Face ID 시) -->
+  <line x1="968" y1="720" x2="1318" y2="720"
+        stroke="#7B5EA7" stroke-width="1.5"
+        stroke-dasharray="5,3" marker-end="url(#arr-purple)"/>
+  <text x="1143" y="714"
+        text-anchor="middle" font-size="13" fill="#7B5EA7">
+    Face ID 인증 시
+  </text>
+
+  <!-- ── 토큰 관리 (jwt.py)  x=984 y=541 w=322 h=335 ── -->
+  <rect x="984" y="541" width="322" height="335" rx="4"
+        fill="none" stroke="#3A6095" stroke-width="1.5" stroke-dasharray="6,3"/>
+  <text x="1145" y="558"
+        text-anchor="middle" font-size="14" font-weight="bold" fill="#3A6095">
+    토큰 관리 (jwt.py)
+  </text>
+
+  <!-- jwt 섹션 1: 토큰 발급·해석  y=562 h=108 -->
+  <rect x="992" y="562" width="306" height="108" rx="3" fill="#3A6095"/>
+  <text x="1145" y="582"
+        text-anchor="middle" font-size="15" font-weight="bold" fill="white">
+    토큰 발급 · 해석
+  </text>
+  <line x1="1000" y1="590" x2="1290" y2="590"
+        stroke="white" stroke-width="0.7" opacity="0.4"/>
+  <text x="1145" y="608"
+        text-anchor="middle" font-size="13" fill="white">
+    로그인 성공 시 접근·갱신 토큰 생성
+  </text>
+  <text x="1145" y="628"
+        text-anchor="middle" font-size="13" fill="white">
+    요청마다 토큰을 해석해 사용자 확인
+  </text>
+
+  <!-- jwt 섹션 2: 보호 API 인증 확인  y=676 h=192 -->
+  <rect x="992" y="676" width="306" height="192" rx="3" fill="#2C5080"/>
+  <text x="1145" y="696"
+        text-anchor="middle" font-size="15" font-weight="bold" fill="white">
+    보호 API 인증 확인
+  </text>
+  <line x1="1000" y1="704" x2="1290" y2="704"
+        stroke="white" stroke-width="0.7" opacity="0.4"/>
+  <text x="1145" y="722"
+        text-anchor="middle" font-size="13" fill="white">
+    토큰 유효성 확인
+  </text>
+  <text x="1145" y="742"
+        text-anchor="middle" font-size="13" fill="white">
+    계정 활성 · 잠금 여부 확인
+  </text>
+  <text x="1145" y="762"
+        text-anchor="middle" font-size="13" fill="white">
+    토큰 버전 불일치 시 접근 차단
+  </text>
+  <line x1="1000" y1="774" x2="1290" y2="774"
+        stroke="white" stroke-width="0.7" opacity="0.3"/>
+  <text x="1145" y="793"
+        text-anchor="middle" font-size="12" fill="#C0D4F0">
+    ※ 토큰 생성과 인증 확인이
+  </text>
+  <text x="1145" y="811"
+        text-anchor="middle" font-size="12" fill="#C0D4F0">
+    한 파일에 함께 존재함
+  </text>
+  <text x="1145" y="829"
+        text-anchor="middle" font-size="12" fill="#C0D4F0">
+    추후 역할별 분리 검토 필요
+  </text>
+
+  <!-- ── 얼굴 인식 엔진 (Vision)  x=1320 y=541 w=538 h=335 ── -->
+  <rect x="1320" y="541" width="538" height="335" rx="4"
+        fill="none" stroke="#7B5EA7" stroke-width="1.5" stroke-dasharray="6,3"/>
+  <text x="1589" y="558"
+        text-anchor="middle" font-size="14" font-weight="bold" fill="#7B5EA7">
+    얼굴 인식 엔진 (vision/service.py)
+  </text>
+
+  <!-- Vision 섹션 1: 얼굴 특징값 추출  y=562 h=108 -->
+  <rect x="1328" y="562" width="522" height="108" rx="3" fill="#7B5EA7"/>
+  <text x="1589" y="582"
+        text-anchor="middle" font-size="15" font-weight="bold" fill="white">
+    얼굴 특징값 추출
+  </text>
+  <line x1="1336" y1="590" x2="1842" y2="590"
+        stroke="white" stroke-width="0.7" opacity="0.4"/>
+  <text x="1589" y="608"
+        text-anchor="middle" font-size="13" fill="white">
+    얼굴 이미지 수신 → 고유 특징값(벡터) 추출
+  </text>
+  <text x="1589" y="628"
+        text-anchor="middle" font-size="13" fill="white">
+    InsightFace 모델 사용
+  </text>
+
+  <!-- Vision 섹션 2: 등록 얼굴과 비교  y=676 h=192 -->
+  <rect x="1328" y="676" width="522" height="192" rx="3" fill="#6040A0"/>
+  <text x="1589" y="696"
+        text-anchor="middle" font-size="15" font-weight="bold" fill="white">
+    등록 얼굴과 비교
+  </text>
+  <line x1="1336" y1="704" x2="1842" y2="704"
+        stroke="white" stroke-width="0.7" opacity="0.4"/>
+  <text x="1589" y="722"
+        text-anchor="middle" font-size="13" fill="white">
+    추출 특징값 vs 저장 특징값 비교
+  </text>
+  <text x="1589" y="742"
+        text-anchor="middle" font-size="13" fill="white">
+    기준값 0.30 이상 시 인증 통과
+  </text>
+  <line x1="1336" y1="754" x2="1842" y2="754"
+        stroke="white" stroke-width="0.7" opacity="0.3"/>
+  <text x="1589" y="773"
+        text-anchor="middle" font-size="13" fill="white">
+    인증 실패 유형
+  </text>
+  <text x="1589" y="793"
+        text-anchor="middle" font-size="12" fill="#D0C0F0">
+    얼굴 불일치 · 미등록 사원
+  </text>
+  <text x="1589" y="813"
+        text-anchor="middle" font-size="12" fill="#D0C0F0">
+    이미지 처리 오류 · 엔진 준비 실패
+  </text>
+
+  <!-- ══════════════════════════════════════════════════ -->
+  <!-- 화살표: FastAPI → DB                               -->
+  <!-- ══════════════════════════════════════════════════ -->
+  <!-- 인증 처리 → DB -->
+  <line x1="687" y1="878" x2="687" y2="924"
+        stroke="#555" stroke-width="2" marker-end="url(#arr)"/>
+  <!-- 토큰 관리 → DB -->
+  <line x1="1145" y1="878" x2="1145" y2="924"
+        stroke="#555" stroke-width="2" marker-end="url(#arr)"/>
+  <!-- ORM 레이블 -->
+  <text x="916" y="908"
+        text-anchor="middle" font-size="14" fill="#444">
+    SQLAlchemy ORM
+  </text>
+
+  <!-- ══════════════════════════════════════════════════════════════════ -->
+  <!-- PostgreSQL DB   x=50 y=927 w=1820 h=135  (끝 y=1062)             -->
+  <!-- ══════════════════════════════════════════════════════════════════ -->
+  <rect x="50" y="927" width="1820" height="135" rx="6"
+        fill="#E8F5E9" stroke="#2E7D52" stroke-width="2" stroke-dasharray="10,5"/>
+  <!-- 레이블 태그 -->
+  <rect x="60" y="920" width="130" height="24" rx="3" fill="#2E7D52"/>
+  <text x="125" y="937"
+        text-anchor="middle" font-size="14" font-weight="bold" fill="white">
+    PostgreSQL DB
+  </text>
+
+  <!-- user_table  x=70 y=947 w=750 h=105 -->
+  <rect x="70" y="947" width="750" height="105" rx="4" fill="#2E7D52"/>
+  <text x="445" y="970"
+        text-anchor="middle" font-size="16" font-weight="bold" fill="white">
+    user_table
+  </text>
+  <line x1="78" y1="978" x2="812" y2="978"
+        stroke="white" stroke-width="0.7" opacity="0.4"/>
+  <text x="445" y="997"
+        text-anchor="middle" font-size="13" fill="white">
+    계정 정보 · 비밀번호 · 잠금 상태 · 로그인 기록
+  </text>
+  <text x="445" y="1032"
+        text-anchor="middle" font-size="11" fill="#C8E6C9">
+    employee_no · password_hash · id_active · id_locked · login_fail_count · token_version · last_login · name · role
+  </text>
+
+  <!-- face_embedding_table  x=840 y=947 w=660 h=105 -->
+  <rect x="840" y="947" width="660" height="105" rx="4" fill="#1B5E38"/>
+  <text x="1170" y="970"
+        text-anchor="middle" font-size="16" font-weight="bold" fill="white">
+    face_embedding_table
+  </text>
+  <line x1="848" y1="978" x2="1492" y2="978"
+        stroke="white" stroke-width="0.7" opacity="0.4"/>
+  <text x="1170" y="997"
+        text-anchor="middle" font-size="13" fill="white">
+    사원별 얼굴 특징값 저장
+  </text>
+  <text x="1170" y="1017"
+        text-anchor="middle" font-size="13" fill="#A0D4A8">
+    Face ID 인증 시 비교 대상
+  </text>
+  <text x="1170" y="1036"
+        text-anchor="middle" font-size="11" fill="#80B888">
+    employee_no · embedding_json
+  </text>
+
+</svg>
+</body>
+</html>

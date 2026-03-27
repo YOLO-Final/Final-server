@@ -1,0 +1,4291 @@
+ROOT: /home/orugu/Docker/Final_project_rss
+GENERATED: 2026-03-14 19:50:23 KST
+
+============================================================
+FILE: nginx/html/web_dashboard.html
+LINES: 25
+============================================================
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>PCB Dashboard</title>
+  <link rel="stylesheet" href="css/wed_dashboard/dashboard_style.css" />
+  <link rel="stylesheet" href="css/wed_dashboard/dashboard_status.css" />
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+  <header class="tabs">
+    <button class="tab-btn" data-tab="worker" id="tab-worker">작업자</button>
+    <button class="tab-btn" data-tab="qa" id="tab-qa">품질관리자</button>
+    <button class="tab-btn active" data-tab="manager" id="tab-manager">관리자</button>
+    <button class="tab-btn" data-tab="promo" id="tab-promo">홍보</button>
+  </header>
+
+  <main id="content"></main>
+
+  <script src="js/wed_dashboard/dashboard_api.js"></script>
+  <script src="js/wed_dashboard/dashboard_charts.js"></script>
+  <script src="js/wed_dashboard/dashboard_app.js"></script>
+</body>
+</html>
+
+
+============================================================
+FILE: nginx/html/js/wed_dashboard/dashboard_app.js
+LINES: 866
+============================================================
+/**
+ * app.js — 메인 애플리케이션 로직
+ * ──────────────────────────────────────────────────────────
+ * 역할:
+ *  1. 앱 시작 시 API에서 전체 데이터 로드
+ *  2. 탭 전환 처리 (worker / qa / manager / promo)
+ *  3. 각 화면 HTML 렌더링 + 차트 초기화
+ *  4. 홍보 스크린: 실시간 시계 + TOP Defect 자동 롤링
+ */
+
+// ── 탭 정의 (id, 레이블, 활성 색상) ─────────────────────
+const TABS = [
+  { id: "worker",  label: "작업자",    color: "#f87171" },
+  { id: "qa",      label: "품질관리자", color: "#fbbf24" },
+  { id: "manager", label: "관리자",    color: "#22d3a0" },
+  { id: "promo",   label: "홍보",      color: "#22d3ee" },
+];
+
+// 현재 활성 탭
+let currentTab = "manager";
+
+// API 데이터 캐시 (탭 전환 시 재요청 없이 재사용)
+let cache = null;
+
+// 홍보 스크린 타이머 ID (언마운트 시 클리어)
+let promoTimers = [];
+
+// ── 상태별 색상 ──────────────────────────────────────────
+const STATUS_COLOR = { RUN: "#22d3a0", IDLE: "#fbbf24", DOWN: "#f87171" };
+const STATUS_BG    = { RUN: "#022c22", IDLE: "#2c1d00", DOWN: "#2d0000" };
+
+/** defects 배열에서 class_name으로 색상 조회 */
+function defectColor(clsName, defects) {
+  return defects.find(d => d.class_name === clsName)?.color ?? "#6b7fa3";
+}
+
+// ── 유틸: HTML 이스케이프 (XSS 방지) ────────────────────
+function esc(str) {
+  return String(str)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
+// ── 유틸: 숫자 포맷 ─────────────────────────────────────
+const fmt = (n) => formatChartNumber(n);
+const pct = (n, dec = 1) => {
+  const txt = formatChartPercent(n, dec);
+  return txt === "-" ? "-" : `${txt}%`;
+};
+
+// ── 9.5.3.7 도넛차트 헬퍼 ───────────────────────────────
+
+/**
+ * 도넛차트 범례 HTML 반환
+ * @param {Array}  items  - [{ label, value, color }]
+ * @param {number} total  - 전체 합계 (비율 표시용, 0이면 값만 표시)
+ */
+function donutLegendHTML(items, total) {
+  return items.map((d) => {
+    const pctVal = total ? (d.percentText ?? `${((Number(d.value) || 0) / total * 100).toFixed(1)}%`) : "";
+    return `
+      <div style="display:flex;align-items:center;gap:6px;margin-bottom:7px">
+        <div style="width:8px;height:8px;border-radius:50%;background:${d.color};flex-shrink:0"></div>
+        <span style="font-size:11px;color:#6b7fa3;flex:1">${esc(d.label)}</span>
+        <span style="font-size:12px;color:${d.color};font-family:'DM Mono',monospace;font-weight:700">
+          ${esc(pctVal || d.valueText || formatChartNumber(d.value))}
+        </span>
+      </div>`;
+  }).join("");
+}
+
+/** 라인 배열 → 상태별 도넛 데이터 변환 */
+function buildStatusDistribution(lines) {
+  const LABEL = { RUN: "가동중", IDLE: "대기", DOWN: "정지" };
+  const COLOR  = { RUN: "#22d3a0", IDLE: "#fbbf24", DOWN: "#f87171" };
+  const counts = {};
+  (lines ?? []).forEach(l => { counts[l.status] = (counts[l.status] ?? 0) + 1; });
+  return Object.entries(counts).map(([st, cnt]) => ({
+    label: LABEL[st] ?? st,
+    value: cnt,
+    color: COLOR[st] ?? "#6b7fa3",
+  }));
+}
+
+// ════════════════════════════════════════════════════════
+// 🖼️ HTML 렌더러
+// ════════════════════════════════════════════════════════
+
+const KPI_STATUS_COLOR = { normal: "#22d3a0", warning: "#fbbf24", danger: "#f87171", neutral: "#6b7fa3" };
+const KPI_STATUS_BG = { normal: "#022c22", warning: "#2c1d00", danger: "#2d0000", neutral: "#151f2e" };
+const KPI_TREND_COLOR = { up: "#f87171", down: "#22d3a0", flat: "#6b7fa3" };
+const KPI_TREND_ICON = { up: "▲", down: "▼", flat: "—" };
+
+// ════════════════════════════════════════════════════════
+// 9.5.3.4 상태 배지 / 프로그레스 바
+// ════════════════════════════════════════════════════════
+
+/**
+ * 내부 상태값(value) → tone(normal/warning/danger/neutral) 반환
+ * @param {string|number} value  - 상태값 또는 수치
+ * @param {object} [opts]
+ *   opts.thresholds  - [{max, tone}] 오름차순. 미지정 시 기본 규칙 사용
+ *   opts.invert      - true: 낮을수록 danger (자재 잔량 등)
+ */
+function resolveTone(value, opts = {}) {
+  // 문자열 상태값 매핑
+  const STATUS_TONE = {
+    RUN:    "normal",
+    IDLE:   "warning",
+    DOWN:   "danger",
+    normal: "normal",
+    warning:"warning",
+    danger: "danger",
+  };
+  if (typeof value === "string") return STATUS_TONE[value] ?? "neutral";
+
+  // 수치 기반 임계치
+  const num = Number(value);
+  const thresholds = opts.thresholds ?? [
+    { max: 39,  tone: opts.invert ? "normal"  : "danger"  },
+    { max: 69,  tone: "warning" },
+    { max: 100, tone: opts.invert ? "danger"  : "normal"  },
+  ];
+  for (const t of thresholds) {
+    if (num <= t.max) return t.tone;
+  }
+  return opts.invert ? "danger" : "normal";
+}
+
+/**
+ * 상태 배지 HTML 반환 (재사용 가능)
+ * @param {object} p
+ *   p.value      - 내부 상태값 (예: "RUN", "normal", "danger")
+ *   p.label      - 표시 텍스트 (예: "가동중", "정상", "위험")
+ *   p.tone       - 직접 지정 시 value 해석 생략 ("normal"|"warning"|"danger"|"neutral")
+ *   p.showDot    - 점 인디케이터 표시 여부 (기본 true)
+ */
+function statusBadgeHTML(p) {
+  const tone = p.tone ?? resolveTone(p.value);
+  const dot  = p.showDot !== false
+    ? `<span class="status-badge-dot" aria-hidden="true"></span>`
+    : "";
+  return `<span class="status-badge status-badge--${tone}" role="status" aria-label="${esc(p.label)}">${dot}${esc(p.label)}</span>`;
+}
+
+/** 로그 status -> tone/label 매핑 */
+function resolveLogMeta(status) {
+  const map = {
+    NG:    { tone: "danger",  label: "불량" },
+    ALARM: { tone: "danger",  label: "알람" },
+    CHECK: { tone: "warning", label: "재검" },
+    RUN:   { tone: "normal",  label: "가동" },
+    IDLE:  { tone: "warning", label: "대기" },
+    DOWN:  { tone: "danger",  label: "정지" },
+  };
+  return map[status] ?? { tone: "neutral", label: status ?? "중립" };
+}
+
+/** rawTimestamp 우선 최신순 정렬 (fallback: time 문자열) */
+function sortRecentLogs(logs = []) {
+  const toMs = (r) => {
+    const ts = new Date(r?.rawTimestamp).getTime();
+    return Number.isFinite(ts) ? ts : Date.parse(`1970-01-01T${r?.time ?? "00:00:00"}+09:00`);
+  };
+  return [...logs].sort((a, b) => toMs(b) - toMs(a));
+}
+
+function renderRecentLogList(logs = [], opts = {}) {
+  const limit = opts.limit ?? 10;
+  const rows = sortRecentLogs(logs).slice(0, limit);
+
+  if (!rows.length) {
+    return `<div class="log-list-empty">집계 기간 내 로그 없음</div>`;
+  }
+
+  const bodyRows = rows.map((r) => {
+    const logMeta = resolveLogMeta(r.status);
+    return `
+      <div class="log-list-row">
+        <span class="log-list-time">${esc(r.time ?? "-")}</span>
+        <span class="log-list-line">${esc(r.line ?? "-")}</span>
+        <span class="log-list-status">${statusBadgeHTML({ tone: logMeta.tone, label: logMeta.label })}</span>
+        <span class="log-list-message" title="${esc(r.message ?? "")}">${esc(r.message ?? "-")}</span>
+      </div>`;
+  }).join("");
+
+  return `
+    <div class="log-list">
+      <div class="log-list-head">
+        <span>시간</span>
+        <span>라인</span>
+        <span>상태</span>
+        <span>메시지</span>
+      </div>
+      <div class="log-list-body">${bodyRows}</div>
+    </div>`;
+}
+
+function formatDateTimeDisplay(value) {
+  return formatChartDateTime(value);
+}
+
+function resolveDetailStatusMeta(value) {
+  const map = {
+    PASS:  { tone: "normal",  label: "양품" },
+    OK:    { tone: "normal",  label: "정상" },
+    RUN:   { tone: "normal",  label: "가동" },
+    NG:    { tone: "danger",  label: "불량" },
+    FAIL:  { tone: "danger",  label: "불량" },
+    DOWN:  { tone: "danger",  label: "정지" },
+    CHECK: { tone: "warning", label: "재검" },
+    HOLD:  { tone: "warning", label: "보류" },
+    IDLE:  { tone: "warning", label: "대기" },
+  };
+  return map[value] ?? { tone: "neutral", label: value ?? "-" };
+}
+
+function compareDetailValues(a, b, type = "text", direction = "asc") {
+  const dir = direction === "desc" ? -1 : 1;
+
+  if (type === "datetime") {
+    const aTime = new Date(a).getTime();
+    const bTime = new Date(b).getTime();
+    const safeA = Number.isFinite(aTime) ? aTime : -Infinity;
+    const safeB = Number.isFinite(bTime) ? bTime : -Infinity;
+    return (safeA - safeB) * dir;
+  }
+
+  if (type === "number" || type === "percent") {
+    const safeA = Number.isFinite(Number(a)) ? Number(a) : -Infinity;
+    const safeB = Number.isFinite(Number(b)) ? Number(b) : -Infinity;
+    return (safeA - safeB) * dir;
+  }
+
+  return String(a ?? "").localeCompare(String(b ?? ""), "ko-KR") * dir;
+}
+
+function sortDetailRows(rows = [], sortBy = {}) {
+  const { key, type = "text", direction = "asc" } = sortBy;
+  if (!key) return [...rows];
+
+  return [...rows].sort((a, b) => compareDetailValues(a?.[key], b?.[key], type, direction));
+}
+
+function formatDetailCell(row, column) {
+  const raw = row?.[column.key];
+
+  if (column.type === "status") {
+    const meta = resolveDetailStatusMeta(raw);
+    return statusBadgeHTML({ tone: meta.tone, label: meta.label });
+  }
+
+  if (raw === null || raw === undefined || raw === "") {
+    return `<span class="detail-table-empty">-</span>`;
+  }
+
+  if (column.type === "datetime") {
+    const display = formatDateTimeDisplay(raw);
+    return `<span class="detail-table-mono" title="${esc(display)}">${esc(display)}</span>`;
+  }
+
+  if (column.type === "id") {
+    return `<span class="detail-table-mono" title="${esc(String(raw))}">${esc(String(raw))}</span>`;
+  }
+
+  if (column.type === "number") {
+    return `<span class="detail-table-num">${fmt(raw)}</span>`;
+  }
+
+  if (column.type === "percent") {
+    return `<span class="detail-table-num">${pct(raw)}</span>`;
+  }
+
+  const text = String(raw);
+  return `<span class="detail-table-text" title="${esc(text)}">${esc(text)}</span>`;
+}
+
+function renderDetailTable({ title, columns = [], rows = [], sortBy, emptyText = "상세 데이터 없음" }) {
+  const sortedRows = sortDetailRows(rows, sortBy);
+
+  const headHTML = columns.map((column) => {
+    const alignClass = column.align === "right" ? "detail-table-th--right" : "";
+    return `<th class="${alignClass}">${esc(column.label)}</th>`;
+  }).join("");
+
+  if (!sortedRows.length) {
+    return `
+      <div class="card">
+        <div class="section-title">${esc(title)}</div>
+        <div class="detail-table-empty-state">${esc(emptyText)}</div>
+      </div>`;
+  }
+
+  const bodyHTML = sortedRows.map((row) => {
+    const cells = columns.map((column) => {
+      const alignClass = column.align === "right" ? "detail-table-td--right" : "";
+      const cellClass = column.type ? `detail-table-td--${column.type}` : "";
+      return `<td class="${alignClass} ${cellClass}">${formatDetailCell(row, column)}</td>`;
+    }).join("");
+    return `<tr>${cells}</tr>`;
+  }).join("");
+
+  return `
+    <div class="card">
+      <div class="section-title">${esc(title)}</div>
+      <div class="detail-table-wrap">
+        <table class="detail-table">
+          <thead>
+            <tr>${headHTML}</tr>
+          </thead>
+          <tbody>${bodyHTML}</tbody>
+        </table>
+      </div>
+    </div>`;
+}
+
+/**
+ * 프로그레스 바 블록 HTML 반환 (재사용 가능)
+ * @param {object} p
+ *   p.label         - 항목 라벨
+ *   p.value         - 현재 값 (숫자)
+ *   p.max           - 최대 값 (기본 100)
+ *   p.unit          - 단위 (기본 "%")
+ *   p.helperText    - 보조 텍스트
+ *   p.tone          - 직접 tone 지정 시 임계치 계산 생략
+ *   p.invert        - true: 낮을수록 danger
+ *   p.thresholds    - 사용자 정의 임계치 배열
+ */
+function progressBarHTML(p) {
+  const max    = p.max  ?? 100;
+  const unit   = p.unit ?? "%";
+  const pct    = Math.min(Math.max((p.value / max) * 100, 0), 100).toFixed(1);
+  const tone   = p.tone ?? resolveTone(p.value, {
+    invert:     p.invert,
+    thresholds: p.thresholds,
+  });
+  const displayVal = typeof p.value === "number"
+    ? (Number.isInteger(p.value) ? p.value : p.value.toFixed(1))
+    : p.value;
+  const helperHTML = p.helperText
+    ? `<div class="progress-block-helper">${esc(p.helperText)}</div>`
+    : "";
+
+  // 색상 강조: 값 색상도 tone 연동
+  const valColor = KPI_STATUS_COLOR[tone] ?? KPI_STATUS_COLOR.neutral;
+
+  return `
+    <div class="progress-block">
+      <div class="progress-block-header">
+        <span class="progress-block-label">${esc(p.label)}</span>
+        <span class="progress-block-value" style="color:${valColor}">${esc(displayVal)}${esc(unit)}</span>
+      </div>
+      <div class="progress-block-track" role="progressbar"
+           aria-valuenow="${p.value}" aria-valuemin="0" aria-valuemax="${max}"
+           aria-label="${esc(p.label)} ${esc(displayVal)}${esc(unit)}">
+        <div class="progress-block-fill progress-block-fill--${tone}" style="width:${pct}%"></div>
+      </div>
+      ${helperHTML}
+    </div>`;
+}
+
+function kpiCardHTML(p) {
+  const title = p.title ?? p.label ?? "";
+  const statusKey = p.status ?? "neutral";
+  const accentClr = p.accent ?? KPI_STATUS_COLOR[statusKey];
+  const subText = p.helperText ?? p.sub ?? "";
+
+  let displayValue = p.value;
+  if (typeof p.value === "number") {
+    displayValue = Number.isInteger(p.value)
+      ? p.value.toLocaleString("ko-KR")
+      : p.value.toFixed(1);
+  }
+
+  const statusBadge = p.statusText ? `
+    <span class="kpi-status-badge"
+          style="color:${KPI_STATUS_COLOR[statusKey]}; background:${KPI_STATUS_BG[statusKey]}; border:1px solid ${KPI_STATUS_COLOR[statusKey]}44">
+      ${esc(p.statusText)}
+    </span>` : "";
+
+  const trendKey = p.trendType ?? "flat";
+  const trendHTML = p.trendValue ? `
+    <span class="kpi-trend" style="color:${KPI_TREND_COLOR[trendKey]}">
+      ${KPI_TREND_ICON[trendKey]} ${esc(p.trendValue)}
+    </span>` : "";
+
+  const unitHTML = p.unit ? `<span class="kpi-unit">${esc(p.unit)}</span>` : "";
+
+  return `
+    <div class="kpi-card" data-kpi="${esc(p.key ?? "")}"
+         style="border:1px solid ${accentClr}33; box-shadow:0 0 20px ${accentClr}14;">
+      <div class="kpi-card-header">
+        <div class="kpi-label">${esc(title)}</div>
+        ${statusBadge}
+      </div>
+      <div class="kpi-value-row">
+        <span class="kpi-value" style="color:${accentClr}">${esc(displayValue)}</span>
+        ${unitHTML}
+      </div>
+      <div class="kpi-card-footer">
+        <div class="kpi-sub">${esc(subText)}</div>
+        ${trendHTML}
+      </div>
+    </div>`;
+}
+
+function renderKpiCards(kpiCards, cols = 4) {
+  return `
+    <div class="grid grid-${cols}" style="gap:10px">
+      ${kpiCards.map(kpiCardHTML).join("")}
+    </div>`;
+}
+
+/* [추가] QA NG 리스트 컬럼 (공통 detail table 재사용) */
+const QA_NG_LIST_COLUMNS = [
+  { key: "detectedAt", label: "검출시각", type: "datetime" },
+  { key: "lineName", label: "라인명", type: "text" },
+  { key: "boardId", label: "보드 ID", type: "id" },
+  { key: "defectType", label: "불량유형", type: "text" },
+  { key: "confidencePct", label: "신뢰도", type: "percent", align: "right" },
+  { key: "judgment", label: "판정", type: "status" },
+];
+
+/* [추가] NG 원본(time/board_id/cls/conf) -> QA 테이블 row */
+function toQaNgRows(ngList = []) {
+  return (ngList ?? []).map((r) => ({
+    detectedAt: `2026-03-14T${String(r.time ?? "00:00:00")}+09:00`,
+    lineName: `LINE ${String(r.board_id ?? "-").split("-")[0]}`,
+    boardId: r.board_id ?? "-",
+    defectType: r.cls ?? "-",
+    confidencePct: Number.isFinite(Number(r.conf)) ? Number(r.conf) * 100 : null,
+    judgment: "NG",
+  }));
+}
+
+/* [교체] renderWorker */
+function renderWorker({ lines = [], defects = [], ngList = [], kpis = [], statusData = null }) {
+  const statusKo = { RUN: "가동중", IDLE: "대기", DOWN: "정지" };
+
+  const statusRows = statusData?.worker?.equipment_status?.length
+    ? statusData.worker.equipment_status
+    : (lines ?? []).map((l) => ({ line: l.id, value: l.status, label: statusKo[l.status] ?? l.status ?? "알 수 없음" }));
+
+  const equipmentBadges = statusRows.length
+    ? statusRows.map((s) => statusBadgeHTML({ value: s.value, label: `L${s.line} ${s.label}` })).join("")
+    : `<div class="list-empty">데이터 없음</div>`;
+
+  const ngRows = (ngList ?? []).slice(0, 7).map((r) => {
+    const clsColor = defectColor(r.cls, defects);
+    const lineId = (r.board_id ?? "-").split("-")[0];
+    const confPct = Number.isFinite(Number(r.conf)) ? Math.floor(Number(r.conf) * 100) : "-";
+    return `
+      <div class="ng-row">
+        <span class="ng-time">${esc(r.time ?? "-")}</span>
+        <span class="ng-line">LINE ${esc(lineId)}</span>
+        <span class="ng-badge" style="background:${clsColor}22; color:${clsColor}; border:1px solid ${clsColor}44">${esc(r.cls ?? "-")}</span>
+        <span class="ng-conf">${esc(String(confPct))}${confPct === "-" ? "" : "%"}</span>
+        <span class="ng-tag">NG</span>
+      </div>`;
+  }).join("");
+
+  return `
+    <div class="screen">
+      <div class="grid grid-3" style="gap:10px">
+        ${kpis.length ? renderKpiCards(kpis, 3) : `<div class="list-empty">KPI 데이터 없음</div>`}
+      </div>
+
+      <div class="card">
+        <div class="section-title">설비 가동 상태</div>
+        <div class="equipment-status-group">${equipmentBadges}</div>
+      </div>
+
+      <div class="card">
+        <div class="section-title">최근 발생 유형 Top 3</div>
+        <div class="chart-wrap" style="height:170px">
+          <canvas id="workerTopDefectBarChart"></canvas>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="section-title">실시간 NG 로그</div>
+        ${ngRows || `<div class="list-empty">집계 기간 내 데이터 없음</div>`}
+      </div>
+    </div>`;
+}
+
+/* [교체] renderQA */
+function renderQA({ defects = [], hourly = [], ngList = [], kpis = [] }) {
+  const qaNgRows = toQaNgRows(ngList);
+  const qaNgTableHTML = renderDetailTable({
+    title: "NG 검출 리스트",
+    columns: QA_NG_LIST_COLUMNS,
+    rows: qaNgRows,
+    sortBy: { key: "detectedAt", type: "datetime", direction: "desc" },
+    emptyText: "NG 검출 데이터 없음",
+  });
+
+  return `
+    <div class="screen">
+      <div class="grid grid-2" style="gap:10px">
+        ${kpis.length ? renderKpiCards(kpis, 2) : `<div class="list-empty">KPI 데이터 없음</div>`}
+      </div>
+
+      <div class="grid grid-chart">
+        <div class="card">
+          <div class="section-title">시간대별 불량률 추이</div>
+          <div class="chart-wrap" style="height:210px"><canvas id="qaLineChart"></canvas></div>
+        </div>
+        <div class="card">
+          <div class="section-title">주요 불량 유형 Top 5</div>
+          <div class="chart-wrap" style="height:210px"><canvas id="qaBarChart"></canvas></div>
+        </div>
+      </div>
+
+      ${qaNgTableHTML}
+    </div>`;
+}
+
+/* [교체] renderManager */
+function renderManager({ lines = [], hourly = [], kpis = [] }) {
+  return `
+    <div class="screen">
+      <div class="grid grid-1" style="gap:10px">
+        ${kpis.length ? renderKpiCards(kpis, 1) : `<div class="list-empty">KPI 데이터 없음</div>`}
+      </div>
+
+      <div class="grid grid-chart">
+        <div class="card">
+          <div class="section-title">시간대별 생산량 / 불량률 추이</div>
+          <div class="chart-wrap" style="height:230px"><canvas id="managerHourlyChart"></canvas></div>
+        </div>
+        <div class="card">
+          <div class="section-title">라인별 생산량 비교</div>
+          <div class="chart-wrap" style="height:230px"><canvas id="managerLineBarChart"></canvas></div>
+        </div>
+      </div>
+    </div>`;
+}
+
+/* [교체] renderPromo */
+function renderPromo({ defects = [], hourly = [], kpis = [] }) {
+  const top3 = [...(defects ?? [])].sort((a, b) => (b.count ?? 0) - (a.count ?? 0)).slice(0, 3);
+  const topDefectRows = top3.length
+    ? top3.map((d, i) => `
+      <div class="promo-top-item">
+        <span>#${i + 1} ${esc(d.class_name ?? "-")}</span>
+        <strong>${formatChartNumber(d.count ?? 0)}건</strong>
+      </div>`).join("")
+    : `<div class="list-empty">집계 기간 내 데이터 없음</div>`;
+
+  return `
+    <div class="promo-screen">
+      <div class="promo-header">
+        <div class="promo-subtitle">Smart Factory PCB</div>
+        <h2 class="promo-title">오늘의 생산 현황</h2>
+        <div class="promo-clock" id="promoClock">00:00:00</div>
+      </div>
+
+      <div class="grid grid-3" style="gap:10px">
+        ${kpis.length ? renderKpiCards(kpis, 3) : `<div class="list-empty">KPI 데이터 없음</div>`}
+      </div>
+
+      <div class="grid" style="grid-template-columns:1fr 1fr; gap:16px; margin-top:16px">
+        <div class="card">
+          <div class="section-title">TOP 3 Defect Class</div>
+          ${topDefectRows}
+        </div>
+        <div class="card">
+          <div class="section-title">시간대별 생산 추이</div>
+          <div class="chart-wrap" style="height:160px"><canvas id="promoLineChart"></canvas></div>
+        </div>
+      </div>
+    </div>`;
+}
+
+/* [교체] startPromoTimers -> 시계만 유지 */
+function startPromoClockOnly() {
+  promoTimers.forEach(clearInterval);
+  promoTimers = [];
+  const updateClock = () => {
+    const el = document.getElementById("promoClock");
+    if (el) el.textContent = new Date().toLocaleTimeString("ko-KR");
+  };
+  updateClock();
+  promoTimers.push(setInterval(updateClock, 1000));
+}
+
+/* [추가] viewModel 렌더 헬퍼: 기존 렌더 함수 정의 하단에 추가 */
+
+function isExpiredMetric(metric) {
+  if (!metric?.validUntil) return false;
+  const t = new Date(metric.validUntil).getTime();
+  return Number.isFinite(t) && Date.now() > t;
+}
+
+function isRenderableMetric(metric) {
+  if (!metric) return false;
+  if (metric.sourceType !== "simulated") return true;
+  return Boolean(metric.validUntil && metric.modelVersion && metric.assumption && metric.caution);
+}
+
+function buildInsightMessages(metrics = []) {
+  return metrics
+    .filter(isRenderableMetric)
+    .map((m) => {
+      const expired = isExpiredMetric(m);
+      const validity = m.validUntil ? `유효: ${formatDateTimeDisplay(m.validUntil)}` : "";
+      return {
+        key: `msg_${m.key}`,
+        text: [m.presentation?.label ?? "-", m.description, validity, expired ? "재산출 필요" : ""].filter(Boolean).join(" · "),
+      };
+    });
+}
+
+function renderInsightMetricCard(metric) {
+  const badge = metric.presentation ?? { tone: "neutral", label: "중립" };
+  const expired = isExpiredMetric(metric);
+  const value = metric.displayValue ?? "-";
+
+  return `
+    <div class="kpi-card insight-card ${expired ? "insight-card--expired" : ""}" data-source="${esc(metric.sourceType)}" data-kind="${esc(metric.insightKind)}">
+      <div class="kpi-card-header">
+        <div class="kpi-label">${esc(metric.label ?? "-")}</div>
+        ${statusBadgeHTML({ tone: badge.tone, label: badge.label })}
+      </div>
+      <div class="kpi-value-row">
+        <span class="kpi-value">${esc(String(value))}</span>
+        ${metric.unit ? `<span class="kpi-unit">${esc(metric.unit)}</span>` : ""}
+      </div>
+      <div class="kpi-card-footer" style="display:block">
+        ${metric.description ? `<div class="insight-meta-row">${esc(metric.description)}</div>` : ""}
+        ${metric.caution ? `<div class="insight-meta-row insight-meta-row--caution">${esc(metric.caution)}</div>` : ""}
+        ${metric.assumption ? `<div class="insight-meta-row">가정: ${esc(metric.assumption)}</div>` : ""}
+        ${metric.modelVersion ? `<div class="insight-meta-row">모델: ${esc(metric.modelVersion)}</div>` : ""}
+        ${metric.validUntil ? `<div class="insight-meta-row">유효: ${esc(formatDateTimeDisplay(metric.validUntil))}${expired ? " · 재산출 필요" : ""}</div>` : ""}
+      </div>
+    </div>`;
+}
+
+function renderPlaceholderCard(metric) {
+  return `
+    <div class="card placeholder-card">
+      <div class="section-title">${esc(metric.label ?? "준비중")}</div>
+      <div class="detail-table-empty-state">시범 지표</div>
+      <div class="kpi-sub" style="margin-top:8px">${esc(metric.description ?? "데이터 연계 예정")}</div>
+      <div class="kpi-sub">${esc(metric.caution ?? "데이터 연계 예정")}</div>
+    </div>`;
+}
+
+function renderInsightGrid({ cards = [], simulated = [], placeholders = [] }, cols = 3) {
+  const primary = (cards || []).filter(isRenderableMetric).map(renderInsightMetricCard).join("");
+  const secondary = (simulated || []).filter(isRenderableMetric).map(renderInsightMetricCard).join("");
+  const placeholderHTML = (placeholders || []).map(renderPlaceholderCard).join("");
+
+  return `
+    <div class="grid grid-${cols}" style="gap:10px">${primary || `<div class="list-empty">표시 가능한 지표 없음</div>`}</div>
+    ${secondary ? `<div class="grid grid-${cols}" style="gap:10px; margin-top:10px">${secondary}</div>` : ""}
+    ${placeholderHTML ? `<div class="grid grid-${Math.min(cols, 2)}" style="gap:10px; margin-top:10px">${placeholderHTML}</div>` : ""}
+  `;
+}
+
+function renderInsightMessagesPanel(metrics = []) {
+  const messages = buildInsightMessages(metrics);
+  if (!messages.length) return `<div class="list-empty">해석 문구 없음</div>`;
+  return `
+    <div class="card">
+      <div class="section-title">해석 문구</div>
+      <div class="log-list-body">
+        ${messages.map((m) => `<div class="kpi-sub" style="margin-bottom:6px">${esc(m.text)}</div>`).join("")}
+      </div>
+    </div>`;
+}
+
+function renderWorkerFromViewModel(vm, raw) {
+  return `
+    <div class="screen">
+      ${renderInsightGrid(vm, 3)}
+      ${renderInsightMessagesPanel([...(vm.cards || [])])}
+      <div class="card">
+        <div class="section-title">최근 발생 유형 Top 3</div>
+        <div class="chart-wrap" style="height:170px"><canvas id="workerTopDefectBarChart"></canvas></div>
+      </div>
+      <div class="card">
+        <div class="section-title">실시간 NG 로그</div>
+        ${(raw.ngList || []).length ? (raw.ngList || []).slice(0, 7).map((r) => `
+          <div class="ng-row">
+            <span class="ng-time">${esc(r.time ?? "-")}</span>
+            <span class="ng-line">LINE ${esc(String(r.board_id ?? "-").split("-")[0])}</span>
+            <span class="ng-badge">${esc(r.cls ?? "-")}</span>
+            <span class="ng-conf">${esc(String(Math.floor((Number(r.conf) || 0) * 100)))}%</span>
+            <span class="ng-tag">NG</span>
+          </div>
+        `).join("") : `<div class="list-empty">집계 기간 내 데이터 없음</div>`}
+      </div>
+    </div>`;
+}
+
+function renderQAFromViewModel(vm, raw) {
+  const qaNgRows = toQaNgRows(raw.ngList || []);
+  const qaNgTableHTML = renderDetailTable({
+    title: "NG 검출 리스트",
+    columns: QA_NG_LIST_COLUMNS,
+    rows: qaNgRows,
+    sortBy: { key: "detectedAt", type: "datetime", direction: "desc" },
+    emptyText: "NG 검출 데이터 없음",
+  });
+
+  return `
+    <div class="screen">
+      ${renderInsightGrid(vm, 2)}
+      ${renderInsightMessagesPanel([...(vm.cards || []), ...(vm.placeholders || [])])}
+      <div class="grid grid-chart">
+        <div class="card">
+          <div class="section-title">시간대별 불량률 추이</div>
+          <div class="chart-wrap" style="height:210px"><canvas id="qaLineChart"></canvas></div>
+        </div>
+        <div class="card">
+          <div class="section-title">주요 불량 유형 Top 5</div>
+          <div class="chart-wrap" style="height:210px"><canvas id="qaBarChart"></canvas></div>
+        </div>
+      </div>
+      ${qaNgTableHTML}
+    </div>`;
+}
+
+function renderManagerFromViewModel(vm) {
+  return `
+    <div class="screen">
+      ${renderInsightGrid(vm, 3)}
+      ${renderInsightMessagesPanel([...(vm.cards || []), ...(vm.simulated || []), ...(vm.placeholders || [])])}
+      <div class="grid grid-chart">
+        <div class="card">
+          <div class="section-title">시간대별 생산량 / 불량률 추이</div>
+          <div class="chart-wrap" style="height:230px"><canvas id="managerHourlyChart"></canvas></div>
+        </div>
+        <div class="card">
+          <div class="section-title">라인별 생산량 비교</div>
+          <div class="chart-wrap" style="height:230px"><canvas id="managerLineBarChart"></canvas></div>
+        </div>
+      </div>
+    </div>`;
+}
+
+function renderPromoFromViewModel(vm, raw) {
+  return `
+    <div class="promo-screen">
+      <div class="promo-header">
+        <div class="promo-subtitle">Smart Factory PCB</div>
+        <h2 class="promo-title">오늘의 생산 현황</h2>
+        <div class="promo-clock" id="promoClock">00:00:00</div>
+      </div>
+      ${renderInsightGrid({ cards: vm.cards || [], simulated: [], placeholders: vm.placeholders || [] }, 3)}
+      <div class="grid" style="grid-template-columns:1fr 1fr; gap:16px; margin-top:16px">
+        <div class="card">
+          <div class="section-title">TOP 3 Defect Class</div>
+          ${[...(raw.defects || [])].sort((a, b) => (b.count || 0) - (a.count || 0)).slice(0, 3).map((d, i) => `
+            <div class="promo-top-item">
+              <span>#${i + 1} ${esc(d.class_name ?? "-")}</span>
+              <strong>${formatChartNumber(d.count ?? 0)}건</strong>
+            </div>
+          `).join("") || `<div class="list-empty">집계 기간 내 데이터 없음</div>`}
+        </div>
+        <div class="card">
+          <div class="section-title">시간대별 생산 추이</div>
+          <div class="chart-wrap" style="height:160px"><canvas id="promoLineChart"></canvas></div>
+        </div>
+      </div>
+    </div>`;
+}
+
+/* [교체] activateTab 함수 전체 교체 */
+function activateTab(tabId) {
+  if (currentTab === "promo") {
+    promoTimers.forEach(clearInterval);
+    promoTimers = [];
+  }
+
+  currentTab = tabId;
+
+  document.querySelectorAll(".tab-btn").forEach((btn) => {
+    const isActive = btn.dataset.tab === tabId;
+    btn.classList.toggle("active", isActive);
+    if (isActive) {
+      const tabDef = TABS.find((t) => t.id === tabId);
+      btn.style.setProperty("--tab-color", tabDef?.color ?? "#22d3a0");
+    }
+  });
+
+  const content = document.getElementById("content");
+  const vm = cache?.viewModel?.[tabId];
+
+  if (!vm) {
+    content.innerHTML = `<div class="list-empty">viewModel 없음</div>`;
+    return;
+  }
+
+  const raw = {
+    summary: cache.summary,
+    lines: cache.lines,
+    defects: cache.defects,
+    hourly: cache.hourly,
+    ngList: cache.ngList,
+    statusData: cache.statusData,
+  };
+
+  if (tabId === "worker") content.innerHTML = renderWorkerFromViewModel(vm, raw);
+  else if (tabId === "qa") content.innerHTML = renderQAFromViewModel(vm, raw);
+  else if (tabId === "manager") content.innerHTML = renderManagerFromViewModel(vm);
+  else if (tabId === "promo") content.innerHTML = renderPromoFromViewModel(vm, raw);
+  else content.innerHTML = `<div class="list-empty">탭 데이터 없음</div>`;
+
+  requestAnimationFrame(() => {
+    if (tabId === "worker") renderWorkerTopDefectBarChart("workerTopDefectBarChart", cache.defects);
+    if (tabId === "qa") {
+      renderDefectRateChart("qaLineChart", cache.hourly);
+      renderDefectBarChart("qaBarChart", cache.defects);
+    }
+    if (tabId === "manager") {
+      if (typeof renderHourlyChartWithSimulatedOverlay === "function") {
+        renderHourlyChartWithSimulatedOverlay("managerHourlyChart", cache.hourly, vm.simulated || []);
+      } else {
+        renderHourlyChart("managerHourlyChart", cache.hourly);
+      }
+      renderLineOutputChart("managerLineBarChart", cache.lines);
+    }
+    if (tabId === "promo") {
+      renderPromoLineChart("promoLineChart", cache.hourly);
+      startPromoClockOnly();
+    }
+  });
+}
+
+/**
+ * 앱 초기화 — DOM 로드 후 실행
+ * 1. API에서 전체 데이터 로드
+ * 2. 탭 이벤트 리스너 등록
+ * 3. 기본 탭(관리자) 활성화
+ */
+async function initApp() {
+  try {
+    // 모든 API 병렬 호출 (fetchAll: api.js)
+    cache = await fetchAll();
+
+    // 탭 버튼 클릭 이벤트 등록
+    document.querySelectorAll(".tab-btn").forEach(btn => {
+      btn.addEventListener("click", () => activateTab(btn.dataset.tab));
+    });
+
+    // 기본 탭 활성화
+    activateTab("manager");
+
+  } catch (err) {
+    // API 오류 시 에러 메시지 표시
+    document.getElementById("content").innerHTML = `
+      <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; height:60vh; color:#f87171; gap:12px">
+        <div style="font-size:32px">⚠</div>
+        <div>API 연결 실패: ${esc(err.message)}</div>
+        <div style="font-size:12px; color:#4a5d7a">FastAPI 서버가 실행 중인지 확인하세요</div>
+        <code style="font-size:11px; color:#6b7fa3">uvicorn backend.main:app --reload</code>
+      </div>`;
+  }
+}
+
+// DOM 준비 완료 후 앱 초기화 실행
+document.addEventListener("DOMContentLoaded", initApp);
+
+
+============================================================
+FILE: nginx/html/js/wed_dashboard/dashboard_charts.js
+LINES: 716
+============================================================
+/**
+ * charts.js — Chart.js 기반 차트 렌더링 함수
+ * ──────────────────────────────────────────────────────────
+ * 각 함수는 canvas 요소 ID와 데이터를 받아 차트를 그립니다.
+ * 차트 인스턴스를 Map에 저장해 탭 전환 시 destroy 후 재생성합니다.
+ */
+
+// 생성된 차트 인스턴스 저장 (메모리 누수 방지)
+const chartInstances = new Map();
+
+const CHART_TOKENS = {
+  grid: "#1e2d40",
+  gridSoft: "#1a2535",
+  border: "#1e2d40",
+  cardBg: "#0a111c",
+  tooltipBg: "#0a111cee",
+  textLabel: "#4a5d7a",
+  textBody: "#a0b4cc",
+  textMain: "#e2ecff",
+  green: "#22d3a0",
+  yellow: "#fbbf24",
+  red: "#f87171",
+  blueBar: "#1e3a5f",
+  blueBorder: "#2a4a7f",
+  cyan: "#22d3ee",
+  donutOther: "#3a4a5e",
+  fontMono: "'DM Mono', monospace",
+};
+
+/** 기존 차트를 파괴하고 새로 그리기 위한 준비 */
+function destroyChart(id) {
+  if (chartInstances.has(id)) {
+    chartInstances.get(id).destroy();
+    chartInstances.delete(id);
+  }
+}
+
+// Chart.js 전역 기본값 — 다크 테마에 맞게 조정
+Chart.defaults.color = CHART_TOKENS.textLabel;
+Chart.defaults.font.family = CHART_TOKENS.fontMono;
+Chart.defaults.plugins.legend.labels.boxWidth = 12;
+
+function formatChartNumber(value) {
+  const num = Number(value);
+  if (!Number.isFinite(num)) return "-";
+  return num.toLocaleString("ko-KR");
+}
+
+function formatChartPercent(value, decimals = 1) {
+  const num = Number(value);
+  if (!Number.isFinite(num)) return "-";
+  return num.toFixed(decimals);
+}
+
+function formatChartCompactTick(value) {
+  const num = Number(value);
+  if (!Number.isFinite(num)) return "";
+  if (Math.abs(num) >= 1000) return `${(num / 1000).toFixed(1)}k`;
+  return Number.isInteger(num) ? String(num) : String(num);
+}
+
+function formatChartTimeLabel(value) {
+  if (!value) return "-";
+  const text = String(value);
+  if (/^\d{2}:\d{2}(:\d{2})?$/.test(text)) return text.slice(0, 5);
+
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime())) return text;
+
+  const hh = String(date.getHours()).padStart(2, "0");
+  const mm = String(date.getMinutes()).padStart(2, "0");
+  return `${hh}:${mm}`;
+}
+
+function formatChartDateTime(value) {
+  if (!value) return "-";
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime())) return String(value);
+
+  const yyyy = date.getFullYear();
+  const mm = String(date.getMonth() + 1).padStart(2, "0");
+  const dd = String(date.getDate()).padStart(2, "0");
+  const hh = String(date.getHours()).padStart(2, "0");
+  const mi = String(date.getMinutes()).padStart(2, "0");
+  const ss = String(date.getSeconds()).padStart(2, "0");
+  return `${yyyy}-${mm}-${dd} ${hh}:${mi}:${ss}`;
+}
+
+function createChartInstance(canvasId, config) {
+  destroyChart(canvasId);
+  const ctx = document.getElementById(canvasId)?.getContext("2d");
+  if (!ctx) return null;
+
+  const chart = new Chart(ctx, config);
+  chartInstances.set(canvasId, chart);
+  return chart;
+}
+
+function createLineChart(canvasId, config) {
+  return createChartInstance(canvasId, { type: "line", ...config });
+}
+
+function createBarChart(canvasId, config) {
+  return createChartInstance(canvasId, { type: "bar", ...config });
+}
+
+function createDonutChart(canvasId, config) {
+  return createChartInstance(canvasId, { type: "doughnut", ...config });
+}
+
+function createLegendOptions(mode = "hidden") {
+  if (mode === "top-right") {
+    return {
+      display: true,
+      position: "top",
+      align: "end",
+      labels: {
+        boxWidth: 10,
+        padding: 12,
+        font: { size: 11 },
+      },
+    };
+  }
+
+  return { display: false };
+}
+
+function createTooltipOptions(opts = {}) {
+  const base = {
+    backgroundColor: CHART_TOKENS.tooltipBg,
+    borderColor: CHART_TOKENS.border,
+    borderWidth: 1,
+    titleColor: CHART_TOKENS.textLabel,
+    bodyColor: CHART_TOKENS.textBody,
+    padding: 10,
+    callbacks: opts.callbacks ?? {},
+  };
+  if (opts.mode !== undefined) base.mode = opts.mode;
+  if (opts.intersect !== undefined) base.intersect = opts.intersect;
+  return base;
+}
+
+function createTimeAxis(labels, opts = {}) {
+  const maxLabels = opts.maxLabels ?? 10;
+  const skipStep = labels.length > maxLabels ? Math.ceil(labels.length / maxLabels) : 1;
+
+  return {
+    grid: { color: opts.gridColor ?? CHART_TOKENS.grid },
+    ticks: {
+      color: opts.tickColor ?? CHART_TOKENS.textLabel,
+      font: { family: CHART_TOKENS.fontMono, size: 11 },
+      callback: (_value, idx) => (idx % skipStep === 0 ? formatChartTimeLabel(labels[idx]) : ""),
+      maxRotation: 0,
+      autoSkip: false,
+    },
+  };
+}
+
+function createValueAxis(opts = {}) {
+  return {
+    position: opts.position ?? "left",
+    beginAtZero: opts.beginAtZero ?? true,
+    grid: { color: opts.gridColor ?? CHART_TOKENS.grid, display: opts.gridDisplay ?? true },
+    min: opts.min,
+    max: opts.max,
+    suggestedMax: opts.suggestedMax,
+    ticks: {
+      color: opts.tickColor ?? CHART_TOKENS.textLabel,
+      font: { family: CHART_TOKENS.fontMono, size: 11 },
+      callback: opts.compact ? (value) => formatChartCompactTick(value) : undefined,
+    },
+    title: opts.title
+      ? {
+          display: true,
+          text: opts.title,
+          color: opts.titleColor ?? CHART_TOKENS.textLabel,
+          font: { size: 10 },
+        }
+      : undefined,
+  };
+}
+
+function createCountAxis(opts = {}) {
+  return {
+    beginAtZero: true,
+    grid: { color: opts.gridColor ?? CHART_TOKENS.grid, display: opts.gridDisplay ?? true },
+    ticks: {
+      color: opts.tickColor ?? CHART_TOKENS.textLabel,
+      font: { family: CHART_TOKENS.fontMono, size: 11 },
+    },
+  };
+}
+
+function createPercentAxis(opts = {}) {
+  return {
+    position: opts.position ?? "left",
+    min: opts.min ?? 0,
+    max: opts.max,
+    suggestedMax: opts.suggestedMax,
+    grid: { color: opts.gridColor ?? CHART_TOKENS.grid, display: opts.gridDisplay ?? true },
+    ticks: {
+      color: opts.tickColor ?? CHART_TOKENS.textLabel,
+      font: { family: CHART_TOKENS.fontMono, size: 11 },
+      callback: (value) => {
+        const txt = formatChartPercent(value, 1);
+        return txt === "-" ? "-" : `${txt}%`;
+      },
+    },
+    title: opts.title
+      ? {
+          display: true,
+          text: opts.title,
+          color: opts.titleColor ?? CHART_TOKENS.textLabel,
+          font: { size: 10 },
+        }
+      : undefined,
+  };
+}
+
+function prepareDonutDisplayData(items, opts = {}) {
+  const maxItems = opts.maxItems ?? 6;
+  let chartItems = [...(items ?? [])].sort((a, b) => b.value - a.value);
+
+  if (chartItems.length > maxItems) {
+    const topItems = chartItems.slice(0, maxItems);
+    const otherValue = chartItems.slice(maxItems).reduce((sum, item) => sum + (Number(item.value) || 0), 0);
+    topItems.push({ label: "기타", value: otherValue, color: CHART_TOKENS.donutOther });
+    chartItems = topItems;
+  }
+
+  const total = chartItems.reduce((sum, item) => sum + (Number(item.value) || 0), 0);
+  const legendItems = chartItems.map((item) => ({
+    ...item,
+    percentText: total ? `${((Number(item.value) || 0) / total * 100).toFixed(1)}%` : "",
+    valueText: formatChartNumber(item.value),
+  }));
+
+  return { chartItems, legendItems, total };
+}
+
+/* [추가] 기존 helper 영역 하단에 추가 */
+
+function renderCanvasEmpty(canvasId, message = "데이터 없음") {
+  destroyChart(canvasId);
+  const canvas = document.getElementById(canvasId);
+  if (!canvas) return null;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return null;
+
+  const w = canvas.width || canvas.clientWidth || 300;
+  const h = canvas.height || canvas.clientHeight || 150;
+  ctx.clearRect(0, 0, w, h);
+  ctx.save();
+  ctx.fillStyle = "#4a5d7a";
+  ctx.font = "12px 'DM Mono', monospace";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText(message, w / 2, h / 2);
+  ctx.restore();
+  return null;
+}
+
+/* [추가] Worker Top3 전용 수평 바 */
+function renderWorkerTopDefectBarChart(canvasId, defects) {
+  const rows = Array.isArray(defects) ? [...defects] : [];
+  if (!rows.length) return renderCanvasEmpty(canvasId, "집계 기간 내 데이터 없음");
+
+  const top3 = rows
+    .filter((d) => Number.isFinite(Number(d.count)))
+    .sort((a, b) => Number(b.count) - Number(a.count))
+    .slice(0, 3);
+
+  if (!top3.length) return renderCanvasEmpty(canvasId, "집계 기간 내 데이터 없음");
+
+  return createBarChart(canvasId, {
+    data: {
+      labels: top3.map((d) => d.class_name),
+      datasets: [
+        {
+          label: "불량 건수",
+          data: top3.map((d) => Number(d.count)),
+          backgroundColor: top3.map((d) => `${d.color}bb`),
+          borderColor: top3.map((d) => d.color),
+          borderWidth: 1,
+          borderRadius: 3,
+          borderSkipped: false,
+        },
+      ],
+    },
+    options: {
+      indexAxis: "y",
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: createLegendOptions("hidden"),
+        tooltip: createTooltipOptions({
+          callbacks: {
+            title: (items) => items[0]?.label ?? "-",
+            label: (item) => ` 건수: ${formatChartNumber(item.raw)}건`,
+          },
+        }),
+      },
+      scales: {
+        x: createCountAxis(),
+        y: {
+          grid: { display: false },
+          ticks: {
+            color: CHART_TOKENS.textBody,
+            font: { family: CHART_TOKENS.fontMono, size: 11 },
+          },
+        },
+      },
+    },
+  });
+}
+
+/* [교체] renderDefectRateChart */
+function renderDefectRateChart(canvasId, hourly) {
+  const rows = Array.isArray(hourly) ? hourly : [];
+  const actual = rows.filter((h) => h?.defect_rate !== null && h?.defect_rate !== undefined);
+  if (!actual.length) return renderCanvasEmpty(canvasId, "집계 기간 내 데이터 없음");
+
+  return createLineChart(canvasId, {
+    data: {
+      labels: actual.map((h) => formatChartTimeLabel(h.time)),
+      datasets: [{
+        label: "불량률(%)",
+        data: actual.map((h) => h.defect_rate),
+        borderColor: CHART_TOKENS.yellow,
+        backgroundColor: "rgba(251,191,36,0.08)",
+        borderWidth: 2.5,
+        pointRadius: 4,
+        pointBackgroundColor: CHART_TOKENS.yellow,
+        fill: true,
+      }],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: createLegendOptions("hidden"),
+        tooltip: createTooltipOptions({
+          callbacks: {
+            title: (items) => `시간: ${items[0].label}`,
+            label: (item) => ` 불량률: ${formatChartPercent(item.raw, 1)}%`,
+          },
+        }),
+      },
+      scales: {
+        x: createTimeAxis(actual.map((h) => formatChartTimeLabel(h.time))),
+        y: createPercentAxis({ max: 10 }),
+      },
+    },
+  });
+}
+
+/* [교체] renderDefectBarChart */
+function renderDefectBarChart(canvasId, defects) {
+  const rows = Array.isArray(defects) ? [...defects] : [];
+  if (!rows.length) return renderCanvasEmpty(canvasId, "집계 기간 내 데이터 없음");
+
+  const top5 = rows
+    .filter((d) => Number.isFinite(Number(d.count)))
+    .sort((a, b) => Number(b.count) - Number(a.count))
+    .slice(0, 5);
+
+  if (!top5.length) return renderCanvasEmpty(canvasId, "집계 기간 내 데이터 없음");
+
+  return createBarChart(canvasId, {
+    data: {
+      labels: top5.map((d) => d.class_name),
+      datasets: [{
+        label: "불량 건수",
+        data: top5.map((d) => Number(d.count)),
+        backgroundColor: top5.map((d) => `${d.color}bb`),
+        borderColor: top5.map((d) => d.color),
+        borderWidth: 1,
+        borderRadius: 3,
+        borderSkipped: false,
+      }],
+    },
+    options: {
+      indexAxis: "y",
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: createLegendOptions("hidden"),
+        tooltip: createTooltipOptions({
+          callbacks: {
+            title: (items) => items[0]?.label ?? "-",
+            label: (item) => ` 건수: ${formatChartNumber(item.raw)}건`,
+          },
+        }),
+      },
+      scales: {
+        x: createCountAxis(),
+        y: {
+          grid: { display: false },
+          ticks: { color: CHART_TOKENS.textBody, font: { family: CHART_TOKENS.fontMono, size: 11 } },
+        },
+      },
+    },
+  });
+}
+
+/* [교체] renderHourlyChart */
+function renderHourlyChart(canvasId, hourly) {
+  const rows = Array.isArray(hourly) ? hourly : [];
+  if (!rows.length) return renderCanvasEmpty(canvasId, "집계 기간 내 데이터 없음");
+
+  const labels = rows.map((h) => formatChartTimeLabel(h.time));
+  const produced = rows.map((h) => (h?.produced ?? null));
+  const defectRate = rows.map((h) => (h?.defect_rate ?? null));
+
+  return createBarChart(canvasId, {
+    data: {
+      labels,
+      datasets: [
+        {
+          label: "생산량",
+          data: produced,
+          backgroundColor: CHART_TOKENS.blueBar,
+          borderRadius: 3,
+          yAxisID: "y",
+        },
+        {
+          label: "불량률(%)",
+          data: defectRate,
+          type: "line",
+          borderColor: CHART_TOKENS.yellow,
+          backgroundColor: "transparent",
+          borderWidth: 2.5,
+          pointRadius: 4,
+          pointBackgroundColor: CHART_TOKENS.yellow,
+          spanGaps: false,
+          yAxisID: "y2",
+        },
+      ],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: createLegendOptions("top-right"),
+        tooltip: createTooltipOptions({
+          mode: "index",
+          intersect: false,
+          callbacks: {
+            title: (items) => `시간: ${items[0].label}`,
+            label: (item) => item.datasetIndex === 0
+              ? ` 생산량: ${formatChartNumber(item.raw)} pcs`
+              : ` 불량률: ${formatChartPercent(item.raw, 1)}%`,
+          },
+        }),
+      },
+      scales: {
+        x: createTimeAxis(labels),
+        y: createValueAxis({ title: "생산량 (pcs)", compact: true }),
+        y2: createPercentAxis({ position: "right", max: 10, gridDisplay: false, title: "불량률 (%)" }),
+      },
+    },
+  });
+}
+
+/* [교체] renderLineOutputChart */
+function renderLineOutputChart(canvasId, lines) {
+  const rows = Array.isArray(lines) ? lines : [];
+  if (!rows.length) return renderCanvasEmpty(canvasId, "집계 기간 내 데이터 없음");
+
+  const STATUS_CLR = { RUN: CHART_TOKENS.green, IDLE: CHART_TOKENS.yellow, DOWN: CHART_TOKENS.red };
+
+  return createBarChart(canvasId, {
+    data: {
+      labels: rows.map((l) => `LINE ${l.id}`),
+      datasets: [
+        {
+          label: "실적 (pcs)",
+          data: rows.map((l) => Number(l.produced ?? 0)),
+          backgroundColor: rows.map((l) => `${STATUS_CLR[l.status] ?? "#4a9eff"}99`),
+          borderColor: rows.map((l) => STATUS_CLR[l.status] ?? "#4a9eff"),
+          borderWidth: 1,
+          borderRadius: 4,
+          order: 1,
+        },
+        {
+          label: "계획 (pcs)",
+          data: rows.map((l) => Number(l.plan ?? 0)),
+          backgroundColor: CHART_TOKENS.blueBar,
+          borderColor: CHART_TOKENS.blueBorder,
+          borderWidth: 1,
+          borderRadius: 4,
+          order: 2,
+        },
+      ],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: createLegendOptions("top-right"),
+        tooltip: createTooltipOptions({
+          mode: "index",
+          intersect: false,
+          callbacks: {
+            label: (item) => ` ${item.dataset.label}: ${formatChartNumber(item.raw)} pcs`,
+            afterBody: (items) => {
+              const prod = items.find((i) => i.datasetIndex === 0);
+              const plan = items.find((i) => i.datasetIndex === 1);
+              if (!prod || !plan || !plan.raw) return [];
+              return [`달성률: ${formatChartPercent((prod.raw / plan.raw) * 100, 1)}%`];
+            },
+          },
+        }),
+      },
+      scales: {
+        x: { grid: { color: CHART_TOKENS.grid }, ticks: { color: CHART_TOKENS.textLabel, font: { size: 11 } } },
+        y: createValueAxis({ compact: true }),
+      },
+    },
+  });
+}
+
+/* [교체] renderPromoLineChart */
+function renderPromoLineChart(canvasId, hourly) {
+  const rows = Array.isArray(hourly) ? hourly : [];
+  const data = rows.filter((h) => h?.produced !== null && h?.produced !== undefined);
+  if (!data.length) return renderCanvasEmpty(canvasId, "집계 기간 내 데이터 없음");
+
+  return createLineChart(canvasId, {
+    data: {
+      labels: data.map((h) => formatChartTimeLabel(h.time)),
+      datasets: [{
+        label: "생산량",
+        data: data.map((h) => Number(h.produced)),
+        borderColor: CHART_TOKENS.cyan,
+        backgroundColor: "rgba(34,211,238,0.08)",
+        borderWidth: 3,
+        pointRadius: 0,
+        fill: true,
+      }],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: createLegendOptions("hidden"),
+        tooltip: createTooltipOptions({
+          callbacks: {
+            title: (items) => `시간: ${items[0].label}`,
+            label: (item) => ` 생산량: ${formatChartNumber(item.raw)} pcs`,
+          },
+        }),
+      },
+      scales: {
+        x: createTimeAxis(data.map((h) => formatChartTimeLabel(h.time)), { gridColor: CHART_TOKENS.gridSoft }),
+        y: createValueAxis({ compact: true, gridColor: CHART_TOKENS.gridSoft }),
+      },
+    },
+  });
+}
+
+// ──────────────────────────────────────────────────────────────
+// 9.5.3.7 범용 도넛차트
+// ──────────────────────────────────────────────────────────────
+
+/**
+ * 범용 도넛차트 (비중/구성비)
+ * @param {string} canvasId
+ * @param {Array}  items   - [{ label, value, color }]
+ * @param {object} [opts]
+ *   opts.centerText     - 중심 큰 텍스트 (null/undefined 이면 숨김)
+ *   opts.centerSubText  - 중심 하단 보조 텍스트
+ *   opts.maxItems       - 최대 항목 수, 초과 시 "기타" 합산 (기본 6)
+ *   opts.cutout         - 도넛 두께 (기본 "62%")
+ */
+function renderDonutChart(canvasId, items, opts = {}) {
+  const cutout = opts.cutout ?? "62%";
+  const { chartItems, total } = prepareDonutDisplayData(items, opts);
+
+  // 중심 수치 인라인 플러그인 (opts.centerText 있을 때만 등록)
+  const plugins = [];
+  if (opts.centerText != null) {
+    plugins.push({
+      id: "donutCenter",
+      beforeDraw(chart) {
+        const { ctx: c, chartArea } = chart;
+        const cx = chartArea.left + chartArea.width  / 2;
+        const cy = chartArea.top  + chartArea.height / 2;
+        const hasSub = Boolean(opts.centerSubText);
+        c.save();
+        c.textAlign    = "center";
+        c.textBaseline = "middle";
+        c.fillStyle    = CHART_TOKENS.textMain;
+        c.font         = `700 16px ${CHART_TOKENS.fontMono}`;
+        c.fillText(String(opts.centerText), cx, cy - (hasSub ? 9 : 0));
+        if (hasSub) {
+          c.fillStyle = CHART_TOKENS.textLabel;
+          c.font      = `400 10px ${CHART_TOKENS.fontMono}`;
+          c.fillText(String(opts.centerSubText), cx, cy + 12);
+        }
+        c.restore();
+      },
+    });
+  }
+
+  return createDonutChart(canvasId, {
+    data: {
+      labels: chartItems.map(d => d.label),
+      datasets: [{
+        data:             chartItems.map(d => d.value),
+        backgroundColor:  chartItems.map(d => d.color),
+        borderColor:      CHART_TOKENS.cardBg,
+        borderWidth:      2,
+        hoverBorderWidth: 3,
+      }],
+    },
+    options: {
+      responsive:          true,
+      maintainAspectRatio: false,
+      cutout,
+      plugins: {
+        legend: createLegendOptions("hidden"),
+        tooltip: createTooltipOptions({
+          callbacks: {
+            label: (item) => {
+              const ratio = total ? (Number(item.raw) / total) * 100 : 0;
+              return ` ${item.label}: ${formatChartNumber(item.raw)} (${ratio.toFixed(1)}%)`;
+            },
+          },
+        }),
+      },
+    },
+    plugins,
+  });
+}
+
+/* [추가] manager 전용 simulated overlay 함수 */
+
+function extractManagerPredictionSeries(hourly = [], simulatedMetrics = []) {
+  const riskMetric = (simulatedMetrics || []).find((m) => m.key === "sim_risk_score");
+  const predicted = (hourly || [])
+    .filter((h) => h?.predicted_defect !== null && h?.predicted_defect !== undefined)
+    .map((h) => ({ time: h.time, value: Number(h.predicted_defect) }));
+
+  return {
+    predicted,
+    riskLabel: riskMetric ? `참고용 위험도 ${riskMetric.displayValue}` : "참고용 예측선",
+  };
+}
+
+function renderHourlyChartWithSimulatedOverlay(canvasId, hourly = [], simulatedMetrics = []) {
+  const rows = Array.isArray(hourly) ? hourly : [];
+  const labels = rows.map((r) => r.time);
+  const produced = rows.map((r) => Number(r.produced) || 0);
+  const actualDefectRate = rows.map((r) =>
+    r.defect_rate === null || r.defect_rate === undefined ? null : Number(r.defect_rate)
+  );
+
+  const { predicted, riskLabel } = extractManagerPredictionSeries(rows, simulatedMetrics);
+  const predMap = new Map(predicted.map((p) => [p.time, p.value]));
+  const predictedSeries = labels.map((t) => (predMap.has(t) ? predMap.get(t) : null));
+
+  return createLineChart(canvasId, {
+    data: {
+      labels,
+      datasets: [
+        {
+          label: "생산량(실측)",
+          data: produced,
+          borderColor: CHART_TOKENS.cyan,
+          backgroundColor: `${CHART_TOKENS.cyan}22`,
+          yAxisID: "yCount",
+          tension: 0.25,
+          borderWidth: 2,
+          pointRadius: 2,
+        },
+        {
+          label: "불량률(실측)",
+          data: actualDefectRate,
+          borderColor: CHART_TOKENS.red,
+          backgroundColor: `${CHART_TOKENS.red}22`,
+          yAxisID: "yRate",
+          tension: 0.25,
+          borderWidth: 2,
+          pointRadius: 2,
+          spanGaps: true,
+        },
+        {
+          label: `${riskLabel} (예측)`,
+          data: predictedSeries,
+          borderColor: CHART_TOKENS.yellow,
+          backgroundColor: `${CHART_TOKENS.yellow}22`,
+          yAxisID: "yRate",
+          tension: 0.2,
+          borderWidth: 2,
+          pointRadius: 2,
+          spanGaps: true,
+          borderDash: [6, 4],
+        },
+      ],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: createLegendOptions("top-right"),
+        tooltip: createTooltipOptions(),
+      },
+      scales: {
+        x: createTimeAxis(labels),
+        yCount: createValueAxis({ position: "left", title: "생산량", compact: true }),
+        yRate: createPercentAxis({ position: "right", title: "불량률", gridDisplay: false, suggestedMax: 8 }),
+      },
+    },
+  });
+}
+
+
+============================================================
+FILE: nginx/html/js/wed_dashboard/dashboard_api.js
+LINES: 414
+============================================================
+/* [교체] KPI/상태/NG 스키마 정리 + fetchAll 반환 스키마 정리 */
+
+const MOCK_LINES = [
+  { id: "A", produced: 4200, plan: 5000, defect_rate: 2.1, status: "RUN" },
+  { id: "B", produced: 3950, plan: 5000, defect_rate: 3.8, status: "RUN" },
+  { id: "C", produced: 2870, plan: 5000, defect_rate: 4.5, status: "DOWN" },
+  { id: "D", produced: 2180, plan: 5000, defect_rate: 2.7, status: "IDLE" },
+];
+
+const MOCK_DEFECTS = [
+  { class_name: "short", count: 260, color: "#f87171" },
+  { class_name: "open", count: 120, color: "#fb923c" },
+  { class_name: "spur", count: 100, color: "#fbbf24" },
+  { class_name: "mousebite", count: 70, color: "#a3e635" },
+  { class_name: "spurious_copper", count: 50, color: "#22d3ee" },
+  { class_name: "pin_hole", count: 40, color: "#34d399" },
+];
+
+const MOCK_HOURLY = [
+  { time: "08:00", produced: 1200, defect_rate: 2.1, predicted_defect: null },
+  { time: "09:00", produced: 1380, defect_rate: 2.4, predicted_defect: null },
+  { time: "10:00", produced: 1450, defect_rate: 1.9, predicted_defect: null },
+  { time: "11:00", produced: 1310, defect_rate: 3.2, predicted_defect: null },
+  { time: "12:00", produced: 890, defect_rate: 2.8, predicted_defect: null },
+  { time: "13:00", produced: 1420, defect_rate: 2.5, predicted_defect: null },
+  { time: "14:00", produced: 1550, defect_rate: 2.2, predicted_defect: null },
+  { time: "15:00", produced: 1200, defect_rate: null, predicted_defect: 2.8 },
+  { time: "16:00", produced: 0, defect_rate: null, predicted_defect: 3.1 },
+  { time: "17:00", produced: 1000, defect_rate: null, predicted_defect: 3.0 },
+];
+
+const MOCK_NG_LIST = [
+  { time: "14:59:21", board_id: "B-0021", cls: "short", conf: 0.97 },
+  { time: "14:58:12", board_id: "A-0044", cls: "mousebite", conf: 0.88 },
+  { time: "14:57:31", board_id: "C-0033", cls: "spur", conf: 0.85 },
+  { time: "14:56:44", board_id: "B-0019", cls: "open", conf: 0.91 },
+];
+
+const MOCK_SUMMARY = {
+  total_produced: 13200,
+  total_plan: 20000,
+  achievement_rate: 66.0,
+  inspection_qty: 8420,
+  good_qty: 8065,
+  defect_qty: 355,
+  defect_rate: 4.2,
+};
+
+/* [교체] build 계층 + viewModel 조립 블록 */
+
+const MODEL_VERSION = "rule-v1.0.1";
+
+const SOURCE_TYPE = {
+  ACTUAL: "actual",
+  DERIVED: "derived",
+  SIMULATED: "simulated",
+  PLACEHOLDER: "placeholder",
+};
+
+const INSIGHT_KIND = {
+  STATUS: "status",
+  RATIO: "ratio",
+  PREDICTION: "prediction",
+  ALERT: "alert",
+  ACTION: "action",
+};
+
+const ALLOWED_INSIGHT_KIND = new Set(Object.values(INSIGHT_KIND));
+
+function fmtNum(n) {
+  const num = Number(n);
+  if (!Number.isFinite(num)) return "-";
+  return num.toLocaleString("ko-KR");
+}
+function fmtPct(n, dec = 1) {
+  const num = Number(n);
+  if (!Number.isFinite(num)) return "-";
+  return `${num.toFixed(dec)}%`;
+}
+function isoAfterMinutes(minutes) {
+  return new Date(Date.now() + minutes * 60 * 1000).toISOString();
+}
+
+function buildPresentation(sourceType, insightKind) {
+  if (sourceType === SOURCE_TYPE.ACTUAL) return { tone: "normal", label: "실측" };
+  if (sourceType === SOURCE_TYPE.DERIVED) return { tone: "warning", label: insightKind === INSIGHT_KIND.RATIO ? "추정" : "계산" };
+  if (sourceType === SOURCE_TYPE.SIMULATED) return { tone: insightKind === INSIGHT_KIND.ALERT ? "danger" : "neutral", label: insightKind === INSIGHT_KIND.PREDICTION ? "예측" : "참고용" };
+  return { tone: "neutral", label: "준비중" };
+}
+
+function createMetric(item) {
+  return {
+    key: item.key,
+    topic: item.topic || item.key,
+    label: item.label,
+    value: item.value,
+    displayValue: item.displayValue ?? String(item.value ?? "-"),
+    unit: item.unit ?? "",
+    sourceType: item.sourceType,
+    insightKind: item.insightKind,
+    basisTimeRange: item.basisTimeRange ?? "최근 로그 기준",
+    description: item.description ?? "",
+    caution: item.caution ?? "",
+    validUntil: item.validUntil ?? null,
+    modelVersion: item.modelVersion ?? null,
+    assumption: item.assumption ?? null,
+    isUserActionRequired: Boolean(item.isUserActionRequired),
+    priority: item.priority ?? 50,
+    presentation: buildPresentation(item.sourceType, item.insightKind),
+  };
+}
+
+function validateInsightKind(items = []) {
+  return items.filter((item) => ALLOWED_INSIGHT_KIND.has(item.insightKind));
+}
+
+function filterRenderableSimulated(items = []) {
+  return items.filter((m) => {
+    if (m.sourceType !== SOURCE_TYPE.SIMULATED) return true;
+    return Boolean(m.validUntil && m.modelVersion && m.assumption && m.caution);
+  });
+}
+
+function buildActualMetrics(raw) {
+  const { summary, lines } = raw;
+  const downCount = (lines || []).filter((l) => l.status === "DOWN").length;
+  const idleCount = (lines || []).filter((l) => l.status === "IDLE").length;
+
+  return validateInsightKind([
+    createMetric({
+      key: "actual_total_produced",
+      topic: "production_output",
+      label: "누적 생산량",
+      value: summary.total_produced,
+      displayValue: fmtNum(summary.total_produced),
+      unit: "pcs",
+      sourceType: SOURCE_TYPE.ACTUAL,
+      insightKind: INSIGHT_KIND.STATUS,
+      description: "당일 누적 생산량 실측치",
+    }),
+    createMetric({
+      key: "actual_total_plan",
+      topic: "production_output",
+      label: "목표 생산량",
+      value: summary.total_plan,
+      displayValue: fmtNum(summary.total_plan),
+      unit: "pcs",
+      sourceType: SOURCE_TYPE.ACTUAL,
+      insightKind: INSIGHT_KIND.STATUS,
+      description: "당일 계획 생산량",
+    }),
+    createMetric({
+      key: "actual_defect_rate",
+      topic: "defect_rate",
+      label: "현재 불량률",
+      value: summary.defect_rate,
+      displayValue: fmtPct(summary.defect_rate),
+      unit: "%",
+      sourceType: SOURCE_TYPE.ACTUAL,
+      insightKind: INSIGHT_KIND.STATUS,
+      description: "검사 수량 대비 현재 불량률 실측치",
+    }),
+    createMetric({
+      key: "actual_line_down_count",
+      topic: "line_health",
+      label: "정지 라인 수",
+      value: downCount,
+      displayValue: fmtNum(downCount),
+      unit: "라인",
+      sourceType: SOURCE_TYPE.ACTUAL,
+      insightKind: INSIGHT_KIND.STATUS,
+      description: "현재 상태가 DOWN인 라인 수",
+    }),
+    createMetric({
+      key: "actual_line_idle_count",
+      topic: "line_health",
+      label: "대기 라인 수",
+      value: idleCount,
+      displayValue: fmtNum(idleCount),
+      unit: "라인",
+      sourceType: SOURCE_TYPE.ACTUAL,
+      insightKind: INSIGHT_KIND.STATUS,
+      description: "현재 상태가 IDLE인 라인 수",
+    }),
+  ]);
+}
+
+function buildDerivedMetrics(raw) {
+  const { summary, ngList = [] } = raw;
+  const achievement = Number(summary.total_plan) > 0
+    ? (Number(summary.total_produced) / Number(summary.total_plan)) * 100
+    : null;
+  const yieldRate = Number(summary.inspection_qty) > 0
+    ? (Number(summary.good_qty) / Number(summary.inspection_qty)) * 100
+    : null;
+  const recheckCandidateCount = ngList.filter((r) => Number(r.conf) < 0.9).length;
+
+  return validateInsightKind([
+    createMetric({
+      key: "derived_achievement_rate",
+      topic: "production_output",
+      label: "목표 달성률",
+      value: achievement,
+      displayValue: fmtPct(achievement),
+      unit: "%",
+      sourceType: SOURCE_TYPE.DERIVED,
+      insightKind: INSIGHT_KIND.RATIO,
+      basisTimeRange: "당일 00:00~현재",
+      description: "실측 생산량/계획 생산량 고정식 계산값",
+      caution: "추정(계산값)",
+    }),
+    createMetric({
+      key: "derived_yield_rate",
+      topic: "yield",
+      label: "양품률(Yield)",
+      value: yieldRate,
+      displayValue: fmtPct(yieldRate),
+      unit: "%",
+      sourceType: SOURCE_TYPE.DERIVED,
+      insightKind: INSIGHT_KIND.RATIO,
+      basisTimeRange: "당일 검사 로그 기준",
+      description: "양품/검사수량 고정식 계산값",
+      caution: "추정(계산값)",
+    }),
+    createMetric({
+      key: "derived_recheck_candidates",
+      topic: "recheck",
+      label: "재검 후보 수",
+      value: recheckCandidateCount,
+      displayValue: fmtNum(recheckCandidateCount),
+      unit: "건",
+      sourceType: SOURCE_TYPE.DERIVED,
+      insightKind: INSIGHT_KIND.ACTION,
+      basisTimeRange: "최근 NG 로그 기준",
+      description: "신뢰도 90% 미만 로그 집계",
+      caution: "추정(집계값)",
+    }),
+  ]);
+}
+
+function buildSimulatedPredictions(raw, actualMetrics, derivedMetrics) {
+  const defectRate = actualMetrics.find((m) => m.key === "actual_defect_rate")?.value ?? 0;
+  const recheckCount = derivedMetrics.find((m) => m.key === "derived_recheck_candidates")?.value ?? 0;
+  const baseRisk = Math.min(100, Math.round(Number(defectRate) * 12 + Number(recheckCount) * 2));
+
+  const simulated = validateInsightKind([
+    createMetric({
+      key: "sim_risk_score",
+      topic: "risk",
+      label: "단기 위험도",
+      value: baseRisk,
+      displayValue: `${baseRisk}점`,
+      unit: "점",
+      sourceType: SOURCE_TYPE.SIMULATED,
+      insightKind: INSIGHT_KIND.PREDICTION,
+      basisTimeRange: "최근 60분 로그 기준",
+      validUntil: isoAfterMinutes(30),
+      modelVersion: MODEL_VERSION,
+      assumption: "최근 30분 추세가 동일하게 유지된다고 가정",
+      caution: "참고용 추정치이며 실측값이 아님",
+      description: "룰 기반 추정 위험도",
+      isUserActionRequired: baseRisk >= 70,
+      priority: baseRisk >= 70 ? 10 : 40,
+    }),
+    createMetric({
+      key: "sim_urgent_check_recommend",
+      topic: "line_health",
+      label: "긴급 점검 권장",
+      value: baseRisk >= 70 ? "권장" : "모니터링",
+      displayValue: baseRisk >= 70 ? "긴급 점검 권장" : "지속 모니터링",
+      sourceType: SOURCE_TYPE.SIMULATED,
+      insightKind: INSIGHT_KIND.ALERT,
+      basisTimeRange: "최근 라인 상태/불량 로그 기준",
+      validUntil: isoAfterMinutes(20),
+      modelVersion: MODEL_VERSION,
+      assumption: "라인 정지/불량 증가 패턴이 단기 유지된다고 가정",
+      caution: "실제 알람 이벤트가 아닌 참고용 권고",
+      description: "룰 기반 알람 권고",
+      isUserActionRequired: baseRisk >= 70,
+      priority: baseRisk >= 70 ? 5 : 45,
+    }),
+    createMetric({
+      key: "sim_recheck_priority",
+      topic: "recheck",
+      label: "재검 우선순위 제안",
+      value: recheckCount > 0 ? "상위 5건 우선 확인" : "우선 항목 없음",
+      displayValue: recheckCount > 0 ? "상위 5건 우선 확인 권장" : "우선 확인 항목 없음",
+      sourceType: SOURCE_TYPE.SIMULATED,
+      insightKind: INSIGHT_KIND.ACTION,
+      basisTimeRange: "최근 NG/confidence 로그 기준",
+      validUntil: isoAfterMinutes(30),
+      modelVersion: MODEL_VERSION,
+      assumption: "confidence 낮은 순으로 우선 대응한다고 가정",
+      caution: "참고용 우선순위이며 확정 지시가 아님",
+      description: "룰 기반 재검 순서 제안",
+      isUserActionRequired: recheckCount > 0,
+      priority: recheckCount > 0 ? 15 : 60,
+    }),
+  ]);
+
+  return filterRenderableSimulated(simulated);
+}
+
+function buildPlaceholderCards() {
+  return [
+    createMetric({
+      key: "ph_cpk_trend",
+      topic: "quality_capability",
+      label: "공정 능력 지수(Cpk) 추이",
+      value: null,
+      displayValue: "준비중",
+      sourceType: SOURCE_TYPE.PLACEHOLDER,
+      insightKind: INSIGHT_KIND.RATIO,
+      description: "측정 규격 상/하한 데이터 연계 예정",
+      caution: "데이터 연계 예정",
+    }),
+    createMetric({
+      key: "ph_cost_panel",
+      topic: "cost",
+      label: "생산 원가",
+      value: null,
+      displayValue: "준비중",
+      sourceType: SOURCE_TYPE.PLACEHOLDER,
+      insightKind: INSIGHT_KIND.RATIO,
+      description: "원가 데이터 연계 예정",
+      caution: "데이터 연계 예정",
+    }),
+  ];
+}
+
+function buildViewModel({ raw, actualMetrics, derivedMetrics, simulatedInsights, placeholderCards }) {
+  return {
+    worker: {
+      cards: [...actualMetrics, ...derivedMetrics].filter((m) => ["production_output", "line_health", "defect_rate"].includes(m.topic)),
+      simulated: [],
+      placeholders: [],
+      chartData: { lines: raw.lines, defects: raw.defects, hourly: raw.hourly, ngList: raw.ngList },
+    },
+    qa: {
+      cards: [...actualMetrics, ...derivedMetrics].filter((m) => ["defect_rate", "yield", "recheck"].includes(m.topic)),
+      simulated: [],
+      placeholders: placeholderCards.filter((m) => m.topic === "quality_capability"),
+      chartData: { defects: raw.defects, hourly: raw.hourly, ngList: raw.ngList },
+    },
+    manager: {
+      cards: [...actualMetrics, ...derivedMetrics].filter((m) => ["production_output", "yield", "line_health"].includes(m.topic)),
+      simulated: simulatedInsights,
+      placeholders: placeholderCards.filter((m) => m.topic === "cost"),
+      chartData: { lines: raw.lines, hourly: raw.hourly, simulatedOverlay: simulatedInsights },
+    },
+    promo: {
+      cards: [...actualMetrics, ...derivedMetrics].filter((m) => ["production_output", "yield", "defect_rate"].includes(m.topic)),
+      simulated: [],
+      placeholders: [],
+      chartData: { defects: raw.defects, hourly: raw.hourly },
+    },
+  };
+}
+
+async function fetchKpiCards() {
+  return {};
+}
+async function fetchStatusData() {
+  return {
+    worker: {
+      equipment_status: MOCK_LINES.map((l) => ({
+        line: l.id,
+        value: l.status,
+        label: l.status === "RUN" ? "가동중" : l.status === "IDLE" ? "대기" : "정지",
+      })),
+    },
+  };
+}
+
+async function fetchAll() {
+  const raw = {
+    summary: MOCK_SUMMARY,
+    lines: MOCK_LINES,
+    defects: MOCK_DEFECTS,
+    hourly: MOCK_HOURLY,
+    ngList: MOCK_NG_LIST,
+    kpiCards: await fetchKpiCards(),
+    statusData: await fetchStatusData(),
+  };
+
+  const actualMetrics = buildActualMetrics(raw);
+  const derivedMetrics = buildDerivedMetrics(raw);
+  const simulatedInsights = buildSimulatedPredictions(raw, actualMetrics, derivedMetrics);
+  const placeholderCards = buildPlaceholderCards();
+
+  const viewModel = buildViewModel({
+    raw,
+    actualMetrics,
+    derivedMetrics,
+    simulatedInsights,
+    placeholderCards,
+  });
+
+  return {
+    ...raw,
+    layers: {
+      actualMetrics,
+      derivedMetrics,
+      simulatedInsights,
+      placeholderCards,
+    },
+    viewModel,
+    meta: {
+      generatedAt: new Date().toISOString(),
+      sourcePolicyVersion: "source-policy-v1",
+      simulatedDefault: "manager-only",
+    },
+  };
+}
+
+
+============================================================
+FILE: nginx/html/css/wed_dashboard/dashboard_style.css
+LINES: 658
+============================================================
+/*
+ * style.css — PCB Dashboard 전체 스타일
+ * ──────────────────────────────────────────────────────────
+ * 디자인 토큰은 :root CSS 변수로 관리 → 한 곳만 수정하면 전체 반영
+ * 반응형: Mobile(<768) / Tablet(768~1024) / Desktop(>1024)
+ */
+
+/* ── CSS 변수 (디자인 토큰) ─────────────────────────────── */
+:root {
+  --bg-app:    #080e18;
+  --bg-card:   #0c1520;
+  --bg-deep:   #0a111c;
+  --bg-bar:    #1e2d40;
+  --border:    #1a2840;
+  --border-md: #1e2d40;
+
+  --text-label: #4a5d7a;
+  --text-muted: #6b7fa3;
+  --text-body:  #a0b4cc;
+  --text-main:  #e2ecff;
+
+  --blue:   #4a9eff;
+  --cyan:   #22d3ee;
+  --green:  #22d3a0;
+  --yellow: #fbbf24;
+  --red:    #f87171;
+  --orange: #fb923c;
+  --purple: #a78bfa;
+  --lime:   #a3e635;
+
+  --font-mono: 'DM Mono', monospace;
+  --font-sans: 'DM Sans', sans-serif;
+  --font-orb:  'Orbitron', monospace;
+
+  --radius-card:  14px;
+  --radius-inner: 10px;
+}
+
+/* ── 리셋 & 기본 ────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  background: var(--bg-app);
+  color: var(--text-main);
+  font-family: var(--font-sans);
+  min-height: 100vh;
+  -webkit-tap-highlight-color: transparent; /* 모바일 탭 하이라이트 제거 */
+}
+
+::-webkit-scrollbar { width: 4px; height: 4px; }
+::-webkit-scrollbar-track { background: var(--bg-app); }
+::-webkit-scrollbar-thumb { background: var(--border-md); border-radius: 4px; }
+
+/* ── 탭 바 ──────────────────────────────────────────────── */
+#tab-bar {
+  display: flex;
+  align-items: stretch;
+  background: var(--bg-deep);
+  border-bottom: 1px solid var(--border-md);
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  height: 50px;
+}
+
+#brand {
+  display: flex;
+  align-items: center;
+  padding: 0 16px;
+  border-right: 1px solid var(--border-md);
+  margin-right: 4px;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-label);
+  letter-spacing: 1px;
+  white-space: nowrap;
+}
+
+/* 탭 버튼 공통 */
+.tab-btn {
+  flex: none;
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0 18px;
+  min-width: 100px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-label);
+  border-bottom: 2px solid transparent;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  transition: color 0.2s, border-color 0.2s;
+}
+
+/* 활성 탭 색상은 JS에서 --tab-color 변수를 동적으로 주입 */
+.tab-btn.active { color: var(--tab-color, var(--green)); border-bottom-color: var(--tab-color, var(--green)); }
+
+.tab-emoji { font-size: 16px; }
+.tab-label { font-size: 11px; }
+
+/* LIVE 인디케이터 */
+#live-indicator {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0 14px;
+}
+#live-dot {
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: var(--green);
+  box-shadow: 0 0 6px var(--green);
+  animation: pulse 2s infinite;
+}
+#live-text { color: var(--green); font-size: 11px; letter-spacing: 1px; }
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.4; }
+}
+
+/* ── 콘텐츠 영역 ────────────────────────────────────────── */
+#content { overflow-x: hidden; }
+
+/* ── 로딩 ────────────────────────────────────────────────── */
+#loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 60vh;
+  color: var(--text-label);
+  gap: 16px;
+}
+.spinner {
+  width: 40px; height: 40px;
+  border: 3px solid var(--border-md);
+  border-top-color: var(--green);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ── 공통 레이아웃 ──────────────────────────────────────── */
+.screen { padding: 20px; display: flex; flex-direction: column; gap: 14px; }
+
+/* 그리드 헬퍼 */
+.grid { display: grid; gap: 10px; }
+.grid-2 { grid-template-columns: repeat(2, 1fr); }
+.grid-3 { grid-template-columns: repeat(3, 1fr); }
+.grid-4 { grid-template-columns: repeat(4, 1fr); }
+.grid-5 { grid-template-columns: repeat(5, 1fr); }
+.grid-6 { grid-template-columns: repeat(6, 1fr); }
+.grid-chart { grid-template-columns: 1.4fr 1fr; gap: 14px; }
+
+/* ── 카드 ──────────────────────────────────────────────── */
+.card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  padding: 16px;
+}
+
+/* 섹션 제목 (소형 대문자) */
+.section-title {
+  color: var(--text-label);
+  font-size: 10px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  margin-bottom: 14px;
+  font-family: var(--font-sans);
+}
+
+/* ── KPI 카드 ──────────────────────────────────────────── */
+.kpi-card {
+  background: linear-gradient(135deg, #0f1923 60%, #131f2e);
+  border-radius: var(--radius-card);
+  padding: 16px 20px;
+  min-height: 90px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+}
+.kpi-label {
+  font-size: 10px;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  color: var(--text-label);
+  font-family: var(--font-sans);
+}
+.kpi-value {
+  font-size: 26px;
+  font-weight: 700;
+  font-family: var(--font-mono);
+  line-height: 1;
+  margin: 6px 0;
+}
+.kpi-sub { font-size: 11px; color: var(--text-label); }
+
+/* ── 경고 배너 ──────────────────────────────────────────── */
+.alert-banner {
+  background: linear-gradient(90deg, #2d0a00, #3d1500);
+  border: 1px solid var(--red);
+  border-radius: var(--radius-inner);
+  padding: 10px 16px;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  box-shadow: 0 0 20px #f8717144;
+}
+.alert-icon { font-size: 20px; flex-shrink: 0; }
+.alert-title { color: #fca5a5; font-size: 13px; font-weight: 700; }
+.alert-msg   { color: var(--red); font-size: 12px; margin-top: 2px; }
+.alert-time  { color: var(--red); font-size: 11px; flex-shrink: 0; margin-left: auto; }
+
+/* ── Defect 바 리스트 ───────────────────────────────────── */
+.defect-bar-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 9px;
+}
+.defect-bar-label { width: 105px; font-size: 11px; color: var(--text-muted); text-align: right; flex-shrink: 0; }
+.defect-bar-track { flex: 1; height: 18px; background: var(--bg-bar); border-radius: 4px; overflow: hidden; }
+.defect-bar-fill  { height: 100%; border-radius: 4px; transition: width 1.2s ease; }
+.defect-bar-count { width: 28px; font-size: 13px; font-weight: 700; text-align: right; flex-shrink: 0; }
+
+/* ── NG 로그 리스트 ─────────────────────────────────────── */
+.ng-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 0;
+  border-bottom: 1px solid var(--border);
+}
+.ng-time  { font-size: 11px; color: var(--text-label); font-family: var(--font-mono); flex-shrink: 0; }
+.ng-line  { font-size: 11px; color: #506070; flex-shrink: 0; }
+.ng-badge {
+  border-radius: 5px;
+  padding: 1px 8px;
+  font-size: 11px;
+  font-family: var(--font-mono);
+  flex: 1;
+}
+.ng-conf  { font-size: 11px; color: var(--text-label); flex-shrink: 0; }
+.ng-tag   { font-size: 11px; font-weight: 700; color: var(--red); flex-shrink: 0; }
+
+/* ── 최근 이벤트/알람 로그 리스트 (9.5.3.8) ─────────────── */
+.log-list-head,
+.log-list-row {
+  display: grid;
+  grid-template-columns: 84px 74px 92px minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+}
+
+.log-list-head {
+  padding: 0 0 8px;
+  border-bottom: 1px solid var(--border-md);
+  color: var(--text-label);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.log-list-body {
+  max-height: 260px;
+  overflow-y: auto;
+}
+
+.log-list-row {
+  padding: 10px 0;
+  border-bottom: 1px solid #1a2535;
+}
+
+.log-list-time,
+.log-list-line {
+  font-size: 11px;
+  color: var(--text-label);
+  font-family: var(--font-mono);
+}
+
+.log-list-status .status-badge {
+  padding: 2px 8px;
+}
+
+.log-list-message {
+  min-width: 0;
+  color: var(--text-body);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.log-list-empty {
+  padding: 10px 0;
+  color: var(--text-label);
+  font-size: 12px;
+}
+
+/* ── 라인 현황 카드 ─────────────────────────────────────── */
+.line-card {
+  background: var(--bg-deep);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-inner);
+  padding: 11px 13px;
+  margin-bottom: 10px;
+}
+.line-badge {
+  width: 40px; height: 40px;
+  border-radius: 8px;
+  display: flex; align-items: center; justify-content: center;
+  font-weight: 800; font-size: 13px;
+  font-family: var(--font-mono);
+  flex-shrink: 0;
+}
+.line-info { flex: 1; min-width: 0; }
+.line-produced { font-size: 14px; font-weight: 700; font-family: var(--font-mono); color: #c0d0e8; }
+.line-produced small { font-size: 11px; color: var(--text-label); }
+.line-status-badge { border-radius: 5px; padding: 2px 9px; font-size: 11px; font-weight: 700; }
+.progress-track { flex: 1; height: 5px; background: var(--bg-bar); border-radius: 4px; overflow: hidden; }
+.progress-fill  { height: 100%; border-radius: 4px; transition: width 1s ease; }
+
+/* ── 리스크 게이지 ──────────────────────────────────────── */
+.risk-gauge-wrap {
+  background: var(--bg-deep);
+  border-radius: 12px;
+  padding: 14px;
+  text-align: center;
+}
+.risk-label { color: var(--text-label); font-size: 10px; margin-bottom: 10px; font-family: var(--font-sans); }
+.risk-donut {
+  border-radius: 50%;
+  margin: 0 auto 10px;
+  display: flex; align-items: center; justify-content: center;
+}
+.risk-inner {
+  border-radius: 50%;
+  background: var(--bg-deep);
+  display: flex; align-items: center; justify-content: center;
+}
+.risk-pct { font-size: 13px; font-weight: 700; font-family: var(--font-mono); }
+.risk-count { font-size: 12px; color: var(--text-muted); }
+
+/* ── NG 테이블 ──────────────────────────────────────────── */
+.ng-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.ng-table th {
+  color: var(--text-label);
+  text-align: left;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border-md);
+  font-weight: 600;
+  font-size: 11px;
+}
+.ng-table td { padding: 8px 10px; border-bottom: 1px solid #1a2535; }
+.ng-table .td-time { color: var(--text-label); font-family: var(--font-mono); }
+.ng-table .td-id   { color: var(--text-body);  font-family: var(--font-mono); }
+.ng-table .td-conf { color: #c0d0e8; font-family: var(--font-mono); }
+
+/* ── 상세 테이블 (9.5.3.9) ─────────────────────────────── */
+.detail-table-wrap {
+  max-height: 360px;
+  overflow-y: auto;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.detail-table {
+  width: 100%;
+  min-width: 760px;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.detail-table th {
+  color: var(--text-label);
+  text-align: left;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border-md);
+  font-weight: 600;
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.detail-table td {
+  padding: 8px 10px;
+  border-bottom: 1px solid #1a2535;
+  vertical-align: middle;
+}
+
+.detail-table-th--right,
+.detail-table-td--right {
+  text-align: right;
+}
+
+.detail-table-mono {
+  color: var(--text-body);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.detail-table-num {
+  color: #c0d0e8;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.detail-table-text {
+  display: inline-block;
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-body);
+}
+
+.detail-table-td--status .status-badge {
+  padding: 2px 8px;
+}
+
+.detail-table-empty,
+.detail-table-empty-state {
+  color: var(--text-label);
+  font-size: 12px;
+}
+
+.detail-table-empty-state {
+  padding: 10px 0;
+}
+
+/* ── 차트 컨테이너 ──────────────────────────────────────── */
+.chart-wrap { position: relative; width: 100%; }
+
+/* ── 홍보 스크린 전용 ───────────────────────────────────── */
+.promo-screen {
+  min-height: calc(100vh - 50px);
+  padding: 28px;
+  background: radial-gradient(ellipse at 20% 20%, #001a2c 0%, #000d18 60%, #0a0014 100%);
+}
+.promo-header { text-align: center; margin-bottom: 30px; }
+.promo-subtitle { color: var(--cyan); font-size: 10px; letter-spacing: 4px; text-transform: uppercase; margin-bottom: 6px; }
+.promo-title { font-size: 26px; font-weight: 900; color: var(--text-main); letter-spacing: 1px; font-family: var(--font-orb); }
+.promo-clock { color: var(--cyan); font-size: 28px; font-weight: 700; margin-top: 6px; font-family: var(--font-orb); }
+
+.promo-kpi-card {
+  background: rgba(255,255,255,0.04);
+  border-radius: var(--radius-card);
+  padding: 22px 20px;
+  text-align: center;
+}
+.promo-kpi-label { color: var(--text-label); font-size: 9px; letter-spacing: 2px; text-transform: uppercase; margin-bottom: 8px; }
+.promo-kpi-value { font-weight: 900; font-family: var(--font-orb); line-height: 1; font-size: 36px; }
+
+.top-defect-panel {
+  background: rgba(255,255,255,0.03);
+  border-radius: 16px;
+  padding: 24px;
+  text-align: center;
+  transition: border-color 0.5s, box-shadow 0.5s;
+}
+.top-defect-rank {
+  display: inline-block;
+  border-radius: 10px;
+  padding: 4px 16px;
+  margin-bottom: 10px;
+  color: var(--text-label);
+  font-size: 12px;
+}
+.top-defect-name {
+  font-size: 40px;
+  font-weight: 900;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  font-family: var(--font-orb);
+}
+.top-defect-count { color: var(--text-muted); font-size: 15px; margin-top: 8px; }
+.top-defect-dots  { display: flex; justify-content: center; gap: 8px; margin-top: 14px; }
+.dot {
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  background: var(--bg-bar);
+  transition: background 0.3s;
+}
+.dot.active { background: var(--dot-color); }
+
+.promo-chart-panel {
+  background: rgba(255,255,255,0.03);
+  border: 1px solid var(--border-md);
+  border-radius: 16px;
+  padding: 24px;
+}
+
+/* ── 반응형 ─────────────────────────────────────────────── */
+@media (max-width: 767px) {
+  #brand { display: none; }
+
+  .tab-btn {
+    flex: 1;
+    padding: 0 4px;
+    min-width: 0;
+    font-size: 11px;
+  }
+  .tab-emoji { font-size: 20px; }
+  .tab-label { font-size: 9px; }
+  #live-text { display: none; }
+
+  .screen { padding: 14px; }
+
+  .grid-4, .grid-5, .grid-6 { grid-template-columns: repeat(2, 1fr); }
+  .grid-3 { grid-template-columns: repeat(2, 1fr); }
+  .grid-chart { grid-template-columns: 1fr; }
+
+  .kpi-value { font-size: 28px; }
+  .kpi-card  { min-height: 100px; padding: 18px 16px; }
+
+  .defect-bar-label { width: 90px; }
+
+  .risk-donut  { width: 52px !important; height: 52px !important; }
+  .risk-inner  { width: 38px !important; height: 38px !important; }
+  .risk-pct    { font-size: 12px !important; }
+
+  .promo-screen { padding: 16px; }
+  .promo-title  { font-size: 20px; }
+  .promo-clock  { font-size: 22px; }
+  .promo-kpi-value { font-size: 28px; }
+  .promo-kpi-card  { padding: 16px 14px; }
+  .top-defect-name { font-size: 32px; }
+  .top-defect-panel, .promo-chart-panel { padding: 18px; }
+
+  .line-badge { width: 44px !important; height: 44px !important; }
+}
+
+@media (min-width: 768px) and (max-width: 1023px) {
+  .grid-5 { grid-template-columns: repeat(3, 1fr); }
+  .grid-6 { grid-template-columns: repeat(3, 1fr); }
+}
+
+
+/* ── KPI 카드 확장 (9.5.3.3) ────────────────────────────── */
+
+.kpi-card-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+
+.kpi-status-badge {
+  border-radius: 4px;
+  padding: 1px 7px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.kpi-value-row {
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+  margin-bottom: 8px;
+}
+
+.kpi-unit {
+  font-size: 13px;
+  color: var(--text-label);
+  font-family: var(--font-mono);
+  font-weight: 400;
+}
+
+.kpi-card-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.kpi-trend {
+  font-size: 11px;
+  font-family: var(--font-mono);
+  font-weight: 700;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.kpi-card-footer .kpi-sub {
+  margin: 0;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* [추가] 파일 하단에 추가 (기존 .ng-row 계열은 유지, 덮어쓰기 최소화) */
+
+.list-empty {
+  padding: 10px 0;
+  color: var(--text-label);
+  font-size: 12px;
+}
+
+.promo-top-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-body);
+  font-size: 13px;
+}
+
+.promo-top-item strong {
+  color: var(--text-main);
+  font-family: var(--font-mono);
+  font-weight: 700;
+}
+
+/* [추가] insight card 스타일 */
+
+.insight-card[data-source="simulated"] {
+  border-color: #6b7fa344;
+  box-shadow: 0 0 0 1px #6b7fa322 inset;
+}
+
+.insight-card[data-source="derived"] {
+  border-style: dashed;
+}
+
+.insight-card--expired {
+  opacity: 0.58;
+  filter: grayscale(0.35);
+}
+
+.insight-meta-row {
+  font-size: 10px;
+  color: var(--text-label);
+  line-height: 1.35;
+  margin-top: 3px;
+}
+
+.insight-meta-row--caution {
+  color: #fbbf24;
+}
+
+.placeholder-card {
+  border-style: dashed;
+  border-color: #6b7fa355;
+  background: linear-gradient(135deg, #0e1725 50%, #121d2c);
+}
+
+
+============================================================
+FILE: server_api/src/modules/dashboard/service.py
+LINES: 73
+============================================================
+# server_api/src/modules/dashboard/service.py
+
+from fastapi import HTTPException
+
+from src.modules.dashboard.cache import DashboardCache
+from src.modules.dashboard.constants import DEFAULT_REFRESH_INTERVAL, SCREEN_ID_MAP
+from src.modules.dashboard.evaluator import evaluate_kpi
+from src.modules.dashboard.repository import DashboardRepository
+from src.modules.dashboard.schemas import DashboardKPIResponse, KPIInput
+
+
+def dashboard_status_placeholder() -> dict:
+    return {
+        "module": "dashboard",
+        "message": "Dashboard KPI polling service is ready.",
+    }
+
+
+def get_cache_key(screen: str) -> str:
+    return f"dashboard:kpis:{screen}"
+
+
+def get_fallback_data(screen: str, repo: DashboardRepository) -> list[KPIInput]:
+    if screen == "worker":
+        return repo.get_recent_worker_kpis()
+    if screen == "promo":
+        return repo.get_recent_promo_kpis()
+    return []
+
+
+def deserialize_kpis(raw_items: list[dict]) -> list[KPIInput]:
+    return [KPIInput.model_validate(item) for item in raw_items]
+
+
+def aggregate_kpi_data(
+    screen: str,
+    repo: DashboardRepository,
+    cache: DashboardCache,
+) -> DashboardKPIResponse:
+    cache_key = get_cache_key(screen)
+    cached = cache.get_json(cache_key)
+
+    if cached and "items" in cached:
+        raw_items = deserialize_kpis(cached["items"])
+        refresh_interval = int(cached.get("refresh_interval", DEFAULT_REFRESH_INTERVAL))
+    else:
+        raw_items = get_fallback_data(screen, repo)
+        refresh_interval = DEFAULT_REFRESH_INTERVAL
+
+    evaluated_items = [
+        evaluate_kpi(item, refresh_interval=refresh_interval)
+        for item in raw_items
+    ]
+
+    return DashboardKPIResponse(
+        screen=screen,
+        screenId=SCREEN_ID_MAP[screen],
+        refreshInterval=refresh_interval,
+        items=evaluated_items,
+    )
+
+
+def get_dashboard_kpis(
+    screen: str,
+    repo: DashboardRepository | None = None,
+    cache: DashboardCache | None = None,
+) -> DashboardKPIResponse:
+    repo = repo or DashboardRepository()
+    cache = cache or DashboardCache()
+
+    if screen not in SCREEN_ID_MAP:
+        raise HTTPException(status_code=400, detail=f"Unsupported screen: {screen}")
+
+    return aggregate_kpi_data(screen=screen, repo=repo, cache=cache)
+
+============================================================
+FILE: server_api/src/modules/dashboard/router.py
+LINES: 19
+============================================================
+# server_api/src/modules/dashboard/router.py
+
+from fastapi import APIRouter, Query
+
+from src.modules.dashboard.schemas import DashboardKPIResponse
+from src.modules.dashboard.service import dashboard_status_placeholder, get_dashboard_kpis
+
+router = APIRouter(prefix="/dashboard", tags=["dashboard"])
+
+
+@router.get("/status")
+def dashboard_status():
+    return dashboard_status_placeholder()
+
+
+@router.get("/kpis", response_model=DashboardKPIResponse)
+def read_dashboard_kpis(
+    screen: str = Query(..., pattern="^(worker|qa|manager|promo)$"),
+) -> DashboardKPIResponse:
+    return get_dashboard_kpis(screen=screen)
+
+============================================================
+FILE: /home/orugu/Docker/Final_project_rss/docs/db_inventory/20260314_150341_all_tables.txt
+LINES: 140
+============================================================
+                           List of relations
+       Schema       |           Name           |    Type     |  Owner   
+--------------------+--------------------------+-------------+----------
+ information_schema | sql_features             | table       | FP_ADMIN
+ information_schema | sql_implementation_info  | table       | FP_ADMIN
+ information_schema | sql_parts                | table       | FP_ADMIN
+ information_schema | sql_sizing               | table       | FP_ADMIN
+ pg_catalog         | pg_aggregate             | table       | FP_ADMIN
+ pg_catalog         | pg_am                    | table       | FP_ADMIN
+ pg_catalog         | pg_amop                  | table       | FP_ADMIN
+ pg_catalog         | pg_amproc                | table       | FP_ADMIN
+ pg_catalog         | pg_attrdef               | table       | FP_ADMIN
+ pg_catalog         | pg_attribute             | table       | FP_ADMIN
+ pg_catalog         | pg_auth_members          | table       | FP_ADMIN
+ pg_catalog         | pg_authid                | table       | FP_ADMIN
+ pg_catalog         | pg_cast                  | table       | FP_ADMIN
+ pg_catalog         | pg_class                 | table       | FP_ADMIN
+ pg_catalog         | pg_collation             | table       | FP_ADMIN
+ pg_catalog         | pg_constraint            | table       | FP_ADMIN
+ pg_catalog         | pg_conversion            | table       | FP_ADMIN
+ pg_catalog         | pg_database              | table       | FP_ADMIN
+ pg_catalog         | pg_db_role_setting       | table       | FP_ADMIN
+ pg_catalog         | pg_default_acl           | table       | FP_ADMIN
+ pg_catalog         | pg_depend                | table       | FP_ADMIN
+ pg_catalog         | pg_description           | table       | FP_ADMIN
+ pg_catalog         | pg_enum                  | table       | FP_ADMIN
+ pg_catalog         | pg_event_trigger         | table       | FP_ADMIN
+ pg_catalog         | pg_extension             | table       | FP_ADMIN
+ pg_catalog         | pg_foreign_data_wrapper  | table       | FP_ADMIN
+ pg_catalog         | pg_foreign_server        | table       | FP_ADMIN
+ pg_catalog         | pg_foreign_table         | table       | FP_ADMIN
+ pg_catalog         | pg_index                 | table       | FP_ADMIN
+ pg_catalog         | pg_inherits              | table       | FP_ADMIN
+ pg_catalog         | pg_init_privs            | table       | FP_ADMIN
+ pg_catalog         | pg_language              | table       | FP_ADMIN
+ pg_catalog         | pg_largeobject           | table       | FP_ADMIN
+ pg_catalog         | pg_largeobject_metadata  | table       | FP_ADMIN
+ pg_catalog         | pg_namespace             | table       | FP_ADMIN
+ pg_catalog         | pg_opclass               | table       | FP_ADMIN
+ pg_catalog         | pg_operator              | table       | FP_ADMIN
+ pg_catalog         | pg_opfamily              | table       | FP_ADMIN
+ pg_catalog         | pg_parameter_acl         | table       | FP_ADMIN
+ pg_catalog         | pg_partitioned_table     | table       | FP_ADMIN
+ pg_catalog         | pg_policy                | table       | FP_ADMIN
+ pg_catalog         | pg_proc                  | table       | FP_ADMIN
+ pg_catalog         | pg_publication           | table       | FP_ADMIN
+ pg_catalog         | pg_publication_namespace | table       | FP_ADMIN
+ pg_catalog         | pg_publication_rel       | table       | FP_ADMIN
+ pg_catalog         | pg_range                 | table       | FP_ADMIN
+ pg_catalog         | pg_replication_origin    | table       | FP_ADMIN
+ pg_catalog         | pg_rewrite               | table       | FP_ADMIN
+ pg_catalog         | pg_seclabel              | table       | FP_ADMIN
+ pg_catalog         | pg_sequence              | table       | FP_ADMIN
+ pg_catalog         | pg_shdepend              | table       | FP_ADMIN
+ pg_catalog         | pg_shdescription         | table       | FP_ADMIN
+ pg_catalog         | pg_shseclabel            | table       | FP_ADMIN
+ pg_catalog         | pg_statistic             | table       | FP_ADMIN
+ pg_catalog         | pg_statistic_ext         | table       | FP_ADMIN
+ pg_catalog         | pg_statistic_ext_data    | table       | FP_ADMIN
+ pg_catalog         | pg_subscription          | table       | FP_ADMIN
+ pg_catalog         | pg_subscription_rel      | table       | FP_ADMIN
+ pg_catalog         | pg_tablespace            | table       | FP_ADMIN
+ pg_catalog         | pg_transform             | table       | FP_ADMIN
+ pg_catalog         | pg_trigger               | table       | FP_ADMIN
+ pg_catalog         | pg_ts_config             | table       | FP_ADMIN
+ pg_catalog         | pg_ts_config_map         | table       | FP_ADMIN
+ pg_catalog         | pg_ts_dict               | table       | FP_ADMIN
+ pg_catalog         | pg_ts_parser             | table       | FP_ADMIN
+ pg_catalog         | pg_ts_template           | table       | FP_ADMIN
+ pg_catalog         | pg_type                  | table       | FP_ADMIN
+ pg_catalog         | pg_user_mapping          | table       | FP_ADMIN
+ pg_toast           | pg_toast_1213            | TOAST table | FP_ADMIN
+ pg_toast           | pg_toast_1247            | TOAST table | FP_ADMIN
+ pg_toast           | pg_toast_1255            | TOAST table | FP_ADMIN
+ pg_toast           | pg_toast_1260            | TOAST table | FP_ADMIN
+ pg_toast           | pg_toast_1262            | TOAST table | FP_ADMIN
+ pg_toast           | pg_toast_13457           | TOAST table | FP_ADMIN
+ pg_toast           | pg_toast_13462           | TOAST table | FP_ADMIN
+ pg_toast           | pg_toast_13467           | TOAST table | FP_ADMIN
+ pg_toast           | pg_toast_13472           | TOAST table | FP_ADMIN
+ pg_toast           | pg_toast_1417            | TOAST table | FP_ADMIN
+ pg_toast           | pg_toast_1418            | TOAST table | FP_ADMIN
+ pg_toast           | pg_toast_16410           | TOAST table | FP_ADMIN
+ pg_toast           | pg_toast_16417           | TOAST table | FP_ADMIN
+ pg_toast           | pg_toast_16461           | TOAST table | FP_ADMIN
+ pg_toast           | pg_toast_16478           | TOAST table | FP_ADMIN
+ pg_toast           | pg_toast_16483           | TOAST table | FP_ADMIN
+ pg_toast           | pg_toast_16494           | TOAST table | FP_ADMIN
+ pg_toast           | pg_toast_16502           | TOAST table | FP_ADMIN
+ pg_toast           | pg_toast_16508           | TOAST table | FP_ADMIN
+ pg_toast           | pg_toast_16525           | TOAST table | FP_ADMIN
+ pg_toast           | pg_toast_16548           | TOAST table | FP_ADMIN
+ pg_toast           | pg_toast_16566           | TOAST table | FP_ADMIN
+ pg_toast           | pg_toast_16576           | TOAST table | FP_ADMIN
+ pg_toast           | pg_toast_2328            | TOAST table | FP_ADMIN
+ pg_toast           | pg_toast_2396            | TOAST table | FP_ADMIN
+ pg_toast           | pg_toast_2600            | TOAST table | FP_ADMIN
+ pg_toast           | pg_toast_2604            | TOAST table | FP_ADMIN
+ pg_toast           | pg_toast_2606            | TOAST table | FP_ADMIN
+ pg_toast           | pg_toast_2609            | TOAST table | FP_ADMIN
+ pg_toast           | pg_toast_2612            | TOAST table | FP_ADMIN
+ pg_toast           | pg_toast_2615            | TOAST table | FP_ADMIN
+ pg_toast           | pg_toast_2618            | TOAST table | FP_ADMIN
+ pg_toast           | pg_toast_2619            | TOAST table | FP_ADMIN
+ pg_toast           | pg_toast_2620            | TOAST table | FP_ADMIN
+ pg_toast           | pg_toast_2964            | TOAST table | FP_ADMIN
+ pg_toast           | pg_toast_3079            | TOAST table | FP_ADMIN
+ pg_toast           | pg_toast_3118            | TOAST table | FP_ADMIN
+ pg_toast           | pg_toast_3256            | TOAST table | FP_ADMIN
+ pg_toast           | pg_toast_3350            | TOAST table | FP_ADMIN
+ pg_toast           | pg_toast_3381            | TOAST table | FP_ADMIN
+ pg_toast           | pg_toast_3394            | TOAST table | FP_ADMIN
+ pg_toast           | pg_toast_3429            | TOAST table | FP_ADMIN
+ pg_toast           | pg_toast_3456            | TOAST table | FP_ADMIN
+ pg_toast           | pg_toast_3466            | TOAST table | FP_ADMIN
+ pg_toast           | pg_toast_3592            | TOAST table | FP_ADMIN
+ pg_toast           | pg_toast_3596            | TOAST table | FP_ADMIN
+ pg_toast           | pg_toast_3600            | TOAST table | FP_ADMIN
+ pg_toast           | pg_toast_6000            | TOAST table | FP_ADMIN
+ pg_toast           | pg_toast_6100            | TOAST table | FP_ADMIN
+ pg_toast           | pg_toast_6106            | TOAST table | FP_ADMIN
+ pg_toast           | pg_toast_6243            | TOAST table | FP_ADMIN
+ pg_toast           | pg_toast_826             | TOAST table | FP_ADMIN
+ public             | defect_logs              | table       | FP_ADMIN
+ public             | defect_type              | table       | FP_ADMIN
+ public             | environment_logs         | table       | FP_ADMIN
+ public             | equipment                | table       | FP_ADMIN
+ public             | face_embedding_table     | table       | FP_ADMIN
+ public             | items                    | table       | FP_ADMIN
+ public             | lines                    | table       | FP_ADMIN
+ public             | ml_predictions           | table       | FP_ADMIN
+ public             | notifications            | table       | FP_ADMIN
+ public             | product_models           | table       | FP_ADMIN
+ public             | production_logs          | table       | FP_ADMIN
+ public             | prompt_permission_list   | table       | FP_ADMIN
+ public             | user_table               | table       | FP_ADMIN
+ public             | vector_table             | table       | FP_ADMIN
+ public             | vision_result            | table       | FP_ADMIN
+(135 rows)
+
+
+
+============================================================
+FILE: /home/orugu/Docker/Final_project_rss/docs/db_inventory/20260314_150341_columns.tsv
+LINES: 75
+============================================================
+defect_logs	1	defect_id	integer	NO	nextval('defect_logs_defect_id_seq'::regclass)
+defect_logs	2	line_id	integer	NO	
+defect_logs	3	model_id	character varying	NO	
+defect_logs	4	detected_by	character varying	YES	
+defect_logs	5	defect_class	character varying	YES	
+defect_logs	6	inspection_qty	integer	YES	
+defect_logs	7	good_qty	integer	YES	
+defect_logs	8	recorded_at	timestamp without time zone	YES	
+defect_logs	9	defect_qty	integer	YES	
+defect_type	1	class_id	character varying	YES	
+defect_type	2	class_name	character varying	YES	
+defect_type	3	desc	character varying	YES	
+environment_logs	1	env_id	integer	NO	nextval('environment_logs_env_id_seq'::regclass)
+environment_logs	2	line_id	integer	YES	
+environment_logs	3	temperature	double precision	YES	
+environment_logs	4	humidity	double precision	YES	
+environment_logs	5	recorded_at	timestamp without time zone	YES	
+equipment	1	equipment_id	integer	NO	nextval('equipment_equipment_id_seq'::regclass)
+equipment	2	equipment_name	character varying	YES	
+equipment	3	status	character varying	YES	
+equipment	4	last_checked_at	timestamp without time zone	YES	
+equipment	5	line_id	integer	YES	
+face_embedding_table	1	employee_no	character varying	NO	
+face_embedding_table	2	embedding_json	character varying	NO	
+face_embedding_table	3	embedding_id	integer	NO	nextval('face_embedding_table_embedding_id_seq'::regclass)
+items	1	id	integer	NO	nextval('items_id_seq'::regclass)
+items	2	title	character varying	NO	
+items	3	description	character varying	YES	
+lines	1	line_id	integer	NO	nextval('lines_line_id_seq'::regclass)
+lines	2	line_name	character varying	YES	
+lines	3	status	character varying	YES	
+lines	4	current_model_id	character varying	YES	
+ml_predictions	1	pred_id	integer	NO	nextval('ml_predictions_pred_id_seq'::regclass)
+ml_predictions	2	line_id	integer	NO	nextval('ml_predictions_line_id_seq'::regclass)
+ml_predictions	3	pred_type	character varying	YES	
+ml_predictions	4	predicted_value	double precision	YES	
+ml_predictions	5	predicted_at	timestamp without time zone	YES	
+ml_predictions	6	valid_until	timestamp without time zone	YES	
+notifications	1	noti_id	integer	NO	nextval('notifications_noti_id_seq'::regclass)
+notifications	2	line_id	integer	YES	
+notifications	3	target_role	character varying	YES	
+notifications	4	level	integer	YES	
+notifications	5	message	character varying	YES	
+notifications	6	triggered_at	timestamp without time zone	YES	
+notifications	7	expires_at	timestamp without time zone	YES	
+notifications	8	is_dismissed	boolean	YES	
+product_models	2	model_name	character varying	YES	
+product_models	3	alert_threshold	double precision	YES	
+product_models	4	danger_threshold	double precision	YES	
+product_models	5	unit	character varying	YES	
+product_models	6	model_id	character varying	NO	
+production_logs	1	log_id	bigint	NO	nextval('production_logs_log_id_seq'::regclass)
+production_logs	2	line_id	integer	NO	
+production_logs	3	model_id	character varying	NO	
+production_logs	4	produced_qty	integer	YES	
+user_table	1	employee_no	character varying	NO	
+user_table	2	password_hash	character varying	YES	
+user_table	3	id_active	boolean	YES	
+user_table	4	id_locked	boolean	YES	
+user_table	5	login_fail_count	bigint	YES	
+user_table	6	token_version	bigint	YES	
+user_table	7	join_date	timestamp without time zone	YES	
+user_table	8	last_login	timestamp without time zone	YES	
+user_table	9	role	character varying	YES	
+user_table	10	name	character varying	YES	
+user_table	12	line_id	integer	NO	nextval('user_table_line_id_seq'::regclass)
+vector_table	1	employee_no	character varying	YES	
+vector_table	2	face_embedding	tsvector	YES	
+vision_result	1	id	integer	YES	
+vision_result	2	request_id	character varying	YES	
+vision_result	3	image_path	character varying	YES	
+vision_result	4	result_status	character varying	YES	
+vision_result	5	defect_type	character varying	YES	
+vision_result	6	confidence	double precision	YES	
+vision_result	7	created_at	date	YES	
+
+
+============================================================
+FILE: /home/orugu/Docker/Final_project_rss/docs/db_inventory/20260314_150341_constraints.tsv
+LINES: 20
+============================================================
+defect_logs	detected_by	FOREIGN KEY	user_table	employee_no
+defect_logs	line_id	FOREIGN KEY	lines	line_id
+defect_logs	model_id	FOREIGN KEY	product_models	model_id
+defect_logs	defect_id	PRIMARY KEY	defect_logs	defect_id
+environment_logs	line_id	FOREIGN KEY	lines	line_id
+equipment	line_id	FOREIGN KEY	lines	line_id
+face_embedding_table	employee_no	FOREIGN KEY	user_table	employee_no
+face_embedding_table	employee_no	PRIMARY KEY	face_embedding_table	employee_no
+items	id	PRIMARY KEY	items	id
+lines	current_model_id	FOREIGN KEY	product_models	model_id
+lines	line_id	PRIMARY KEY	lines	line_id
+ml_predictions	line_id	FOREIGN KEY	lines	line_id
+notifications	line_id	FOREIGN KEY	lines	line_id
+product_models	model_id	PRIMARY KEY	product_models	model_id
+production_logs	line_id	FOREIGN KEY	lines	line_id
+production_logs	model_id	FOREIGN KEY	product_models	model_id
+production_logs	log_id	PRIMARY KEY	production_logs	log_id
+user_table	line_id	FOREIGN KEY	lines	line_id
+user_table	employee_no	PRIMARY KEY	user_table	employee_no
+vector_table	employee_no	FOREIGN KEY	user_table	employee_no
+
+
+============================================================
+FILE: /home/orugu/Docker/Final_project_rss/docs/db_inventory/20260314_150341_databases.txt
+LINES: 11
+============================================================
+                                                          List of databases
+       Name       |  Owner   | Encoding | Locale Provider |  Collate   |   Ctype    | ICU Locale | ICU Rules |   Access privileges   
+------------------+----------+----------+-----------------+------------+------------+------------+-----------+-----------------------
+ Final_Project_DB | FP_ADMIN | UTF8     | libc            | en_US.utf8 | en_US.utf8 |            |           | 
+ postgres         | FP_ADMIN | UTF8     | libc            | en_US.utf8 | en_US.utf8 |            |           | 
+ template0        | FP_ADMIN | UTF8     | libc            | en_US.utf8 | en_US.utf8 |            |           | =c/FP_ADMIN          +
+                  |          |          |                 |            |            |            |           | FP_ADMIN=CTc/FP_ADMIN
+ template1        | FP_ADMIN | UTF8     | libc            | en_US.utf8 | en_US.utf8 |            |           | =c/FP_ADMIN          +
+                  |          |          |                 |            |            |            |           | FP_ADMIN=CTc/FP_ADMIN
+(4 rows)
+
+
+
+============================================================
+FILE: /home/orugu/Docker/Final_project_rss/docs/9.5.1-7 화면별 KPI 최종 구성안_(최종).md
+LINES: 205
+============================================================
+# 9.5.1-7 화면별 KPI 최종 구성안
+
+## 핵심 요약
+본 문서는 스마트 팩토리 불량 검출 시스템의 각 대시보드 목적에 맞추어 KPI를 화면별로 3~6개 수준으로 압축하고, 역할별 의사결정에 최적화된 최종 KPI 세트를 정의한 결과입니다.  
+본 최종 구성안은 **KPI 우선순위, 데이터 가용성, 화면 목적, 시인성, 즉시 대응 필요성**을 함께 고려하여 각 화면에 우선 배치할 KPI 세트를 확정한 기준안입니다.
+
+---
+
+## 1. 개요
+화면별 KPI 최종 구성은 단순히 중요한 지표를 많이 배치하는 작업이 아니라,  
+**각 역할이 해당 화면에서 가장 먼저 확인해야 하는 질문에 답할 수 있는 지표만 선별하여 상단에 배치하는 작업**입니다.
+
+따라서 본 문서에서는 다음 기준을 적용합니다.
+
+- 각 화면의 존재 목적에 직접 연결되는 KPI를 우선 반영한다.
+- Must KPI를 중심으로 구성하되, 필요 시 Should KPI를 보조적으로 포함한다.
+- 한 화면의 상단 KPI 카드는 과밀하지 않도록 4개 내외를 원칙으로 한다.
+- 동일한 의미의 지표는 화면별 집계 범위만 달리 적용하고 계산 기준은 최대한 통일한다.
+- 상세 원인 분석에 적합한 항목은 상단 카드보다 차트 또는 하단 리스트로 배치한다.
+
+---
+
+## 2. 화면별 KPI 최종 구성
+
+### 2.1 현장 대시보드 (SCR-001)
+
+- **목적**: 실시간 상태 모니터링 및 불량 급증 시 즉각 대응
+- **대상**: 현장 작업자
+
+현장 대시보드는 즉시 대응이 가장 중요하므로, 작업자가 화면 진입 직후  
+**설비 상태 이상 여부**, **불량 급증 여부**, **현재 생산 진척도**를 한눈에 판단할 수 있도록 구성합니다.
+
+| KPI명 | 선정 사유 | 관련 의사결정 | 중요도 |
+|---|---|---|---|
+| 최근 10분 NG 발생 건수 | 실시간 불량 급증 여부를 가장 빠르게 파악할 수 있음 | 라인 정지 및 긴급 점검 결정 | Must |
+| 설비 가동 상태 | 현재 라인의 정상 동작 여부(RUN / DOWN / IDLE)를 즉시 확인 가능 | 즉각적인 설비 복구 조치 | Must |
+| 목표 달성률 | 당일 계획 대비 현재 진척도를 직관적으로 확인할 수 있음 | 생산 속도 조절 및 잔업 판단 | Must |
+| 누적 생산량 | 현재 작업 실적을 수량 기준으로 빠르게 확인할 수 있음 | 작업 진행 상황 및 생산 집중도 판단 | Must |
+
+#### 구성 원칙
+- 현장 화면은 **즉시 대응형 KPI**를 우선 배치합니다.
+- `현재 불량률`은 중요하지만 작업자 화면에서는 상단 카드보다 **보조 품질 블록 또는 차트 영역**에 두는 것이 더 적절합니다.
+
+---
+
+### 2.2 품질 대시보드 (SCR-002)
+
+- **목적**: 불량 원인 분석 및 재검/최종 판정 의사결정
+- **대상**: 품질관리자(QA)
+
+품질 대시보드는 현재 품질 수준, 주요 불량 원인, 사람이 추가 확인해야 할 대상을 빠르게 파악할 수 있도록 구성합니다.
+
+| KPI명 | 선정 사유 | 관련 의사결정 | 중요도 |
+|---|---|---|---|
+| 현재 불량률 | 전체 검사 대비 누적 불량 비율을 빠르게 파악할 수 있음 | 품질 목표 달성 여부 판단 | Must |
+| 주요 불량 유형 (Top 5) | 가장 빈번한 불량 원인을 식별할 수 있음 | 공정 개선 및 원인 분석 우선순위 결정 | Must |
+| 재검 필요 수량 | AI 확신도가 낮아 수동 검토가 필요한 대상을 확인할 수 있음 | 작업 우선순위 및 인력 배분 | Must |
+| 검사 현황 요약 (총 검사 수량 / 양품 수 / 불량 수) | 당일 전체 품질 상태를 총량 기준으로 파악할 수 있음 | 전체 품질 실적 보고 및 이상 여부 확인 | Must |
+| 예측 불량률 (ML) | 자재/환경 변수 기반 향후 불량 추세를 보조적으로 참고할 수 있음 | 선제적 품질 사고 예방 | Should |
+
+#### 구성 원칙
+- 품질 화면은 **현재 상태 + 원인 분석 + 재검 판단**이 동시에 가능해야 합니다.
+- `검사 현황 요약`은 단일 KPI가 아니라 **묶음형 요약 카드**로 해석합니다.
+- `예측 불량률`은 초기 구현에서는 Should로 두고, 데이터 확보 이후 확대 적용합니다.
+
+---
+
+### 2.3 통합 대시보드 (SCR-003)
+
+- **목적**: 전사 생산 지표 통합 관제 및 운영 자원 배분
+- **대상**: 공장 관리자
+
+통합 대시보드는 공장 전체의 효율, 계획 달성 가능성, 라인 간 편차를 함께 판단할 수 있도록 구성합니다.
+
+| KPI명 | 선정 사유 | 관련 의사결정 | 중요도 |
+|---|---|---|---|
+| 전체 라인 OEE | 가동률, 성능, 품질을 통합한 종합 효율 지표 | 공장 전체 생산성 평가 | Must |
+| 공장 전체 목표 달성률 | 전사 계획 대비 현재 실적 진척도를 한눈에 파악 가능 | 전사 생산 계획 조정 | Must |
+| 예상 종료 생산량 | 현재 속도 유지 시 종료 시점의 실적을 예측할 수 있음 | 납기 준수 여부 및 자원 재배치 | Must |
+| 라인별 생산량 비교 | 라인 간 성과 편차와 병목 구간을 식별할 수 있음 | 병목 해소 및 인력 지원 결정 | Must |
+| 불량 위험도 예측 | 향후 단기 품질 리스크를 보조적으로 확인할 수 있음 | 선제적 리스크 관리 | Should |
+
+#### 구성 원칙
+- 관리자 화면은 **비교형 KPI**와 **예측형 KPI**를 함께 포함합니다.
+- `공장 전체 목표 달성률`은 작업자 화면의 목표 달성률과 구분하기 위해 전사 집계 기준임을 명확히 합니다.
+
+---
+
+### 2.4 생산 현황 보드 (SCR-004)
+
+- **목적**: 핵심 성과 공유 및 현장 공감대 형성
+- **대상**: 전 사원 (공용 송출)
+
+생산 현황 보드는 복잡한 분석보다, 공장 전체의 현재 상태를 멀리서도 한눈에 읽을 수 있도록 구성합니다.
+
+| KPI명 | 선정 사유 | 관련 의사결정 | 중요도 |
+|---|---|---|---|
+| 누적 총 생산량 | 당일 공장 전체 성과를 대형 수치로 직관적으로 전달 | 목표 달성 의지 고취 | Must |
+| 목표 달성률 | 계획 대비 현재 위치를 직관적으로 공유 | 생산 진척 상황 인지 | Must |
+| 당일 양품률 | 공장 전체 품질 수준을 한눈에 전달 | 품질 우선 문화 형성 | Must |
+| TOP 3 Defect Class | 현재 가장 주의해야 할 불량 유형을 요약하여 전파 | 품질 주의사항 현장 공유 | Must |
+
+#### 구성 원칙
+- 공용 보드는 **시인성**과 **즉시 이해 가능성**을 최우선으로 합니다.
+- 세부 로그나 긴 설명보다는 숫자와 핵심 불량 유형 요약 중심으로 구성합니다.
+
+---
+
+## 3. 공용 KPI와 역할 특화 KPI 구분
+
+시스템의 일관성과 재사용성을 높이기 위해 KPI는 공용 KPI와 역할 특화 KPI로 구분하여 관리합니다.
+
+### 3.1 공용 KPI (Standard KPIs)
+공용 KPI는 여러 화면에서 공통으로 사용하되, 화면별 집계 범위만 다르게 적용하는 표준 지표입니다.
+
+- **목표 달성률**  
+  - 계산 기준: `해당 화면의 집계 범위(라인/공장)에 대한 현재 양품 수량 ÷ 목표 수량 × 100`
+- **현재 불량률**  
+  - 계산 기준: `해당 화면의 집계 범위(라인/공장)에 대한 누적 불량 수량 ÷ 누적 검사 수량 × 100`
+- **누적 생산량 계열 지표**
+  - 작업자 화면: 라인 또는 작업 기준 누적 생산량
+  - 관리자/공용 화면: 공장 전체 누적 생산량
+
+### 3.2 역할 특화 KPI (Specialized KPIs)
+역할 특화 KPI는 특정 역할의 핵심 의사결정에 직접 연결되는 전용 지표입니다.
+
+- **현장 작업자**
+  - 최근 10분 NG 발생 건수
+  - 설비 가동 상태
+
+- **품질관리자**
+  - 재검 필요 수량
+  - 주요 불량 유형 (Top 5)
+  - 예측 불량률
+
+- **공장 관리자**
+  - 전체 라인 OEE
+  - 예상 종료 생산량
+  - 라인별 생산량 비교
+  - 불량 위험도 예측
+
+- **공용 보드**
+  - TOP 3 Defect Class
+  - 당일 양품률
+
+---
+
+## 4. 화면별 배치 원칙
+
+### 4.1 상단 KPI 카드
+- 작업자 / 품질 / 관리자 대시보드는 **상단 KPI 카드 4개 내외**를 기본으로 합니다.
+- 공용 보드는 **대형 KPI 3개 + 보조 정보 1개** 구성을 원칙으로 합니다.
+- 상단 KPI는 가능한 한 **즉시 상태 판단이 가능한 지표**를 우선 배치합니다.
+
+### 4.2 중단 차트 영역
+- 상단 KPI의 원인 분석이 필요한 항목은 중단 차트로 배치합니다.
+- 추세형 KPI는 라인차트, 비교형 KPI는 막대차트, 구성형 KPI는 도넛/막대차트 중심으로 구성합니다.
+
+### 4.3 하단 상세 리스트
+- 상세 로그, 불량 상세 목록, 검사 이력, 알람 목록 등은 하단 리스트 또는 테이블로 배치합니다.
+- 공용 전시 보드는 가독성을 위해 하단 상세 리스트를 최소화합니다.
+
+---
+
+## 5. 시각화 및 배치 가이드라인
+
+한 화면에 정보가 과밀되지 않도록 다음 원칙을 적용합니다.
+
+- **KPI 카드 (상단)**  
+  핵심 수치를 가로 배열하며, 임계값에 따라 배경색 또는 텍스트 색상을 변경하여 상태 인지를 돕습니다.
+
+- **차트 영역 (중단)**  
+  KPI의 추세, 비교, 분포를 시각화하여 원인 분석과 상황 이해를 지원합니다.
+
+- **상세 리스트 (하단)**  
+  실시간 로그, 검사 대상, 상세 데이터 테이블을 배치하여 후속 확인이 가능하도록 합니다.
+
+- **중복 최소화 원칙**  
+  동일한 의미의 KPI를 한 화면 내에서 반복 배치하지 않고, 상단-중단-하단 역할을 구분합니다.
+
+---
+
+## 6. 정리
+본 문서는 화면별 KPI 최종 묶음을 확정한 기준 문서로서, 이후 차트 유형 선정, UI 배치, API 응답 구성, 더미데이터 검증의 기준으로 활용됩니다.
+
+따라서 후속 구현 단계에서는 단순히 많은 정보를 넣는 방향이 아니라,  
+**각 화면의 목적에 맞는 핵심 KPI를 가장 먼저 보여주고, 나머지 정보는 분석 영역으로 분리하는 방향**을 유지해야 합니다.
+
+즉, 화면별 KPI 최종 구성의 목적은  
+**정보 나열이 아니라 역할별 판단 최적화**에 있습니다.
+
+---
+
+## 7. 후속 연계 작업
+본 문서 다음 단계에서는 아래 작업으로 연결됩니다.
+
+1. **9.5.2 차트 유형 선정**
+   - KPI별 카드형 / 추세형 / 비교형 / 분포형 시각화 방식 결정
+
+2. **9.5.3 차트/테이블 구현**
+   - 화면별 상단 KPI 카드 및 차트 배치 반영
+   - 임계값 기반 색상 및 강조 처리 적용
+
+3. **9.5.5 더미데이터 검증**
+   - 화면별 KPI 값 정상 노출 여부 확인
+   - KPI 묶음 구조와 데이터 연결 구조 검증
+
+============================================================
+FILE: /home/orugu/Docker/Final_project_rss/docs/9.5.2 최종 차트 유형 선정서.md
+LINES: 195
+============================================================
+# 9.5.2 최종 차트 유형 선정서_(최종)
+
+## 핵심 요약
+본 문서는 스마트 팩토리 불량 검출 시스템의 4개 화면에 대해 KPI별 최종 시각화 유형을 확정하고, 그 선정 근거와 구현 우선순위, 데이터 요구사항 요약을 정리한 최종 기준서이다.  
+본 문서는 앞서 수행된 KPI 성격 분류, 차트 후보안 도출, 화면별 배치 초안, 1차/2차 구현 범위 구분, 데이터 요구사항 정의 결과를 통합한 문서로서, 후속 단계인 **9.5.3 차트/테이블 구현**의 직접 기준으로 활용한다.
+
+---
+
+## 1. 작업 목적
+최종 차트 유형 선정의 목적은 화면별 KPI에 대해 가장 적합한 시각화 유형을 확정하여, 사용자가 각 화면에서 필요한 판단을 가장 빠르고 정확하게 수행할 수 있도록 구현 기준을 정립하는 데 있다.
+
+세부 목적은 다음과 같다.
+
+- KPI별 최종 차트 유형을 확정한다.
+- 1차 구현 대상과 2차 고도화 대상을 구분한다.
+- 화면 목적, KPI 성격, 구현 가능성, 데이터 정합성을 종합 반영한다.
+- 후속 구현 단계에서 화면 간 일관된 시각화 기준으로 활용한다.
+
+---
+
+## 2. 최종 선정 기준
+
+### 2.1 기본 선정 원칙
+최종 차트 유형은 아래 원칙을 기준으로 선정한다.
+
+- **해석 최적화**: KPI의 성격(현황, 상태, 추세, 비교, 분포, 예측, 상세)에 가장 적합한 차트를 우선 적용한다.
+- **역할별 위계**: 작업자(즉시 대응), 품질관리자(원인 분석), 관리자(성과 비교 및 운영 판단), 공용 보드(원거리 시인성)에 맞는 표현 구조를 적용한다.
+- **구현 현실성**: 1차 구현은 현재 Chart.js 및 HTML/CSS 구조에서 안정적으로 구현 가능한 표준 차트를 우선 적용한다.
+- **데이터 정합성**: 차트가 요구하는 최소 데이터 필드와 API 응답 구조를 일치시키는 방향으로 선정한다.
+
+### 2.2 1차 / 2차 구분 원칙
+- **1차 구현(Phase 1)**: KPI 카드, 상태 배지, 프로그레스 바 카드, 라인차트, 수평/수직 바차트, 도넛차트, 로그 리스트, 상세 테이블
+- **2차 고도화(Phase 2)**: 게이지 차트, 자동 롤링 고도화, 점선형 예측 구간, 카드 애니메이션, 스파크라인 카드, 이미지 썸네일 확장, 복합 차트 고도화
+
+### 2.3 적용 범위 유의사항
+- 본 문서의 최종 차트는 **기본 시각화 기준**을 의미한다.
+- 경고 배너, 자동 롤링, 점멸 효과, 카운트 업 애니메이션 등은 **보조 UI 요소 또는 고도화 연출 요소**로 관리한다.
+- 구현 코드 위치 및 함수명은 참고 자료로 활용하되, 본 문서의 핵심은 **최종 시각화 의사결정 기준**에 둔다.
+
+---
+
+## 3. 화면별 최종 차트 선정 결과
+
+## 3.1 현장 대시보드 (SCR-001)
+현장 대시보드는 실시간 상태 모니터링과 즉시 대응이 핵심이므로, 상단에는 카드형/상태형 요소를, 하단에는 최근 이벤트와 보조 분석 정보를 배치한다.
+
+| 화면 | KPI / 요소 | 최종 차트 | 대안·고도화 | 선정 근거 | 1차·2차 | 데이터 요구사항 요약 |
+|---|---|---|---|---|---|---|
+| SCR-001 | 최근 10분 NG 발생 건수 | KPI 카드 (Red 강조) | 1분 단위 미니 바차트, 경고 배너 강화 | 작업자가 최근 불량 급증 여부를 즉시 판단해야 하므로 단일 수치 중심 카드가 가장 직관적이다. | 1차 | `label`, `value`, `threshold`, `accent_color`, `status_label` |
+| SCR-001 | 설비 가동 상태 | 상태 배지 (Badge) | 상태 카드 + 마지막 갱신 시각 | RUN/DOWN/IDLE를 빠르게 식별하는 것이 핵심이므로 배지형이 가장 적합하다. | 1차 | `status_label`, `status_code`, `updated_at` |
+| SCR-001 | 목표 달성률 | 프로그레스 바 카드 | 반원형 게이지 차트 | 목표 대비 현재 위치를 선형으로 빠르게 읽을 수 있어야 하므로 프로그레스 카드가 적합하다. | 1차 / 2차 | `value`, `target_value`, `achievement_rate`, `status_label` |
+| SCR-001 | 누적 생산량 | 대형 수치 카드 | 전시간 대비 증감값, 미니 추세선 | 현재까지의 총 생산 실적을 즉시 확인하는 데 대표 수치 중심 카드가 가장 효과적이다. | 1차 / 2차 | `label`, `value`, `unit`, `sub_text` |
+| SCR-001 | 실시간 NG 로그 | 로그 리스트 | 상세 테이블 | 최신 이벤트를 시간순으로 빠르게 훑어보고 즉시 조치 대상을 식별해야 하므로 리스트형이 우선 적합하다. | 1차 | `time`, `id`, `type`, `status`, `score` |
+| SCR-001 | 최근 발생 유형 Top 3 또는 Defect Class 현황 | 수평 바차트 | 순위형 리스트 | 현장 대응에 필요한 최근 불량 유형을 간단히 비교하는 데 수평 비교 구조가 적합하다. | 1차 | `category`, `value`, `rank`, `color` |
+
+---
+
+## 3.2 품질 대시보드 (SCR-002)
+품질 대시보드는 원인 분석과 재검 판정 지원이 핵심이므로, 상단에는 품질 상태 요약, 중단에는 추세 및 유형 분석, 하단에는 상세 판정 리스트를 배치한다.
+
+| 화면 | KPI / 요소 | 최종 차트 | 대안·고도화 | 선정 근거 | 1차·2차 | 데이터 요구사항 요약 |
+|---|---|---|---|---|---|---|
+| SCR-002 | 현재 불량률 | KPI 카드 (상태 라벨 포함) | 미니 라인 차트 | 현재 품질 수준이 허용 범위 내인지 즉시 판단하는 것이 우선이므로 카드형이 적합하다. | 1차 | `label`, `value`, `unit`, `threshold`, `status_label` |
+| SCR-002 | 주요 불량 유형 Top 5 | 수평 바차트 | 도넛 차트 | 긴 항목명 가독성과 상위 항목 간 비교 정확도 측면에서 수평 바차트가 우위이다. | 1차 / 2차 | `category`, `value`, `rank`, `color` |
+| SCR-002 | 시간대별 불량률 추이 | 라인차트 | 영역 강조 라인차트, 전일 비교 라인 | 시간 흐름에 따른 상승/하락 패턴과 변동 구간 분석에 표준적인 형태이기 때문이다. | 1차 / 2차 | `time`, `actual_value`, `target_value`, `predicted_value` |
+| SCR-002 | 재검 필요 수량 | KPI 카드 (Yellow 강조) | 카드 + 상세 리스트 연결 | 현재 처리해야 할 재검 업무량을 빠르게 파악하는 데 카드형이 가장 직접적이다. | 1차 | `label`, `value`, `status_label`, `accent_color` |
+| SCR-002 | 검사 현황 요약 | 묶음형 정보 카드 | 누적 막대 차트 | 총 검사, 양품, 불량 규모를 한 번에 요약 전달하는 데 카드 묶음이 적합하다. | 1차 / 2차 | `total_inspected`, `good_count`, `defect_count` |
+| SCR-002 | NG 검출 리스트 | 상세 테이블 | 카드형 상세 리스트, 이미지 썸네일 확장 | 개별 불량 건의 시각, ID, 유형, 신뢰도, 판정 상태를 정확히 확인하는 데 테이블형이 가장 적합하다. | 1차 / 2차 | `time`, `id`, `type`, `status`, `score`, `image_url` |
+| SCR-002 | 예측 불량률 | 예측값 전용 카드 | 점선형 예측 라인차트 | 실측값과 혼동 없이 예측값을 분리해 전달하는 데 전용 카드가 가장 안정적이다. | 1차 / 2차 | `label`, `value`, `risk_level`, `sub_text` |
+
+---
+
+## 3.3 통합 대시보드 (SCR-003)
+통합 대시보드는 전사 관점의 성과 비교, 운영 흐름 판단, 리스크 요약이 핵심이므로 요약 카드와 비교형 차트를 우선 적용한다.
+
+| 화면 | KPI / 요소 | 최종 차트 | 대안·고도화 | 선정 근거 | 1차·2차 | 데이터 요구사항 요약 |
+|---|---|---|---|---|---|---|
+| SCR-003 | 전체 라인 OEE | KPI 카드 | 게이지 차트 | 현재 전체 효율 수준을 빠르게 해석하는 데 카드형이 구현성과 유지보수성 측면에서 우위이다. | 1차 / 2차 | `label`, `value`, `unit`, `status_label` |
+| SCR-003 | 공장 전체 목표 달성률 | 프로그레스 바 카드 | 목표선 대비 추세 차트 | 전사 생산 계획 대비 현재 진척 수준을 즉시 판단하는 데 프로그레스 구조가 적합하다. | 1차 / 2차 | `achievement_rate`, `target_value`, `value`, `status_label` |
+| SCR-003 | 예상 종료 생산량 | 예측 수치 카드 | 목표선 비교 차트 | 납기 리스크 판단에 필요한 예상 종료값을 가장 직접적으로 전달할 수 있다. | 1차 / 2차 | `label`, `value`, `sub_text`, `target_value` |
+| SCR-003 | 현재 불량률 또는 불량 위험도 요약 | KPI 카드 또는 위험도 카드 | 위험 점수 막대, 위험 추세 라인 | 관리자가 운영 리스크 수준을 즉시 파악할 수 있도록 간결한 요약형 표현이 우선 적합하다. | 1차 / 2차 | `value`, `risk_level`, `status_label`, `accent_color` |
+| SCR-003 | 라인별 생산량 비교 | 수직 바차트 | 수평 바차트 | 여러 라인의 생산 편차와 병목 가능성을 한눈에 비교하는 데 표준적인 구조이다. | 1차 | `category`, `value`, `status_label`, `color` |
+| SCR-003 | 시간대별 생산량 추이 또는 불량률 추이 | 단일 차트(바차트 또는 라인차트) | 복합 차트 (Bar + Line) | 1차 구현에서는 해석 부담과 구현 난이도를 줄이기 위해 단일 차트를 우선 적용한다. | 1차 / 2차 | `time`, `value` 또는 `time`, `actual_value` |
+| SCR-003 | 라인별 상태 요약 | 카드형 요약 또는 리스트 | 라인별 진척바 카드 | 라인별 운영 상태와 가동 상황을 간단히 비교 판단하는 데 요약형 구조가 적합하다. | 1차 / 2차 | `line_name`, `status_label`, `progress`, `value` |
+| SCR-003 | 불량 위험도 예측 | 위험도 카드/배지 | 게이지 차트 | 위험 수준을 빠르게 해석하는 데 카드형이 우선 적합하며, 게이지는 2차 고도화 대상으로 분리한다. | 1차 / 2차 | `risk_level`, `status_label`, `value`, `updated_at` |
+
+---
+
+## 3.4 생산 현황 보드 (SCR-004)
+생산 현황 보드는 공용 송출과 원거리 시인성이 핵심이므로, 대형 수치와 단순 비교/순위형 정보를 우선 적용한다.
+
+| 화면 | KPI / 요소 | 최종 차트 | 대안·고도화 | 선정 근거 | 1차·2차 | 데이터 요구사항 요약 |
+|---|---|---|---|---|---|---|
+| SCR-004 | 누적 총 생산량 | 전시형 대형 KPI 카드 | 카운트 업 효과, 배경 강조 | 원거리에서도 즉시 식별 가능한 대표 수치를 가장 먼저 보여주는 것이 핵심이다. | 1차 / 2차 | `label`, `value`, `unit`, `sub_text` |
+| SCR-004 | 목표 달성률 | 대형 프로그레스 바 + 백분율 | 원형 채우기 시각화 | 누구나 현재 진척 수준을 직관적으로 이해할 수 있도록 단순 진행률 구조를 우선 적용한다. | 1차 / 2차 | `achievement_rate`, `value`, `target_value` |
+| SCR-004 | 당일 양품률 | 대형 KPI 카드 | 전일 대비 증감 배지, 미니 추세선 | 공용 보드에서 현재 품질 수준을 빠르게 공유하는 데 카드형이 가장 적합하다. | 1차 / 2차 | `label`, `value`, `unit`, `sub_text`, `status_label` |
+| SCR-004 | TOP 3 Defect Class | 순위형 리스트 | 자동 롤링 패널, 수평 바차트 | 공용 보드에서는 주의해야 할 불량 항목을 우선순위 중심으로 빠르게 공유하는 것이 중요하다. | 1차 / 2차 | `category`, `value`, `rank`, `color` |
+| SCR-004 | 시간대별 생산 추이 | 심플 라인차트 | 영역 강조형 라인차트 | 단순한 생산 흐름 공유가 목적이므로 복잡성을 줄인 라인차트가 적합하다. | 1차 / 2차 | `time`, `actual_value` |
+| SCR-004 | 헤더 시계 및 타이틀 | 실시간 시계 + 타이틀 | 전시형 시계 고도화 | 공용 보드의 현재성과 화면 정체성을 명확히 하기 위한 기본 요소이다. | 1차 / 2차 | `current_time`, `title` |
+
+---
+
+## 4. 구현 범위 및 데이터 요구사항 요약
+
+### 4.1 1차 구현 대상
+- KPI 카드
+- 상태 배지
+- 프로그레스 바 카드
+- 라인차트
+- 수평/수직 바차트
+- 도넛차트
+- 로그 리스트
+- 상세 테이블
+- 전시형 대형 카드
+- 순위형 리스트
+
+### 4.2 2차 고도화 대상
+- 게이지 차트
+- 자동 롤링 고도화
+- 점선형 예측 구간
+- 카드 애니메이션
+- 스파크라인 내장 카드
+- 이미지 썸네일 확장
+- 복합 차트 (Bar + Line)
+- 원형 채우기 시각화
+- 전시 보드 고도화 연출
+
+### 4.3 필수 데이터 구조 요약
+시각화 구현을 위해 API 응답 또는 프론트 바인딩 구조는 최소 아래 범주를 포함해야 한다.
+
+#### 시간별 데이터
+```json
+{
+  "time": "14:00",
+  "produced": 1550,
+  "defect_rate": 2.2,
+  "predicted_defect": 2.8
+}
+```
+
+#### 불량 통계 데이터
+```json
+{
+  "class_name": "short",
+  "count": 260,
+  "risk": 0.82,
+  "color": "#f87171"
+}
+```
+
+#### 요약 정보 데이터
+```json
+{
+  "total_produced": 13200,
+  "total_plan": 20000,
+  "achievement_rate": 66.0,
+  "total_defects": 640,
+  "defect_rate": 2.8,
+  "lines_running": 2
+}
+```
+
+#### NG 상세 로그 데이터
+```json
+{
+  "time": "14:59",
+  "board_id": "B-0021",
+  "cls": "short",
+  "conf": 0.97,
+  "status": "NG"
+}
+```
+
+## 5. 구현 연계 참고 사항
+
+본 문서의 최종 차트 유형은 현재 프론트엔드 구조를 기준으로 다음 원칙과 연계한다.
+
+- 차트 엔진은 dashboard_charts.js의 Chart.js 기반 렌더링 구조를 표준으로 활용한다.
+- 화면 조립은 dashboard_app.js의 역할별 렌더링 구조와 연결한다.
+- 차트 데이터는 dashboard_api.js 기준 응답 구조와 일치하도록 맞춘다.
+- 차트 재생성 시에는 기존 인스턴스를 정리하는 방식으로 메모리 누수를 방지한다.
+- 자동 롤링, 카운트 업, 게이지 등 고도화 요소는 1차 기본 기능 안정화 이후 적용한다.
+
+## 6. 후속 구현 연계 포인트
+
+본 문서는 다음 단계의 직접 입력자료로 활용한다.
+
+- 9.5.3 차트/테이블 구현: 화면별 최종 차트 기준으로 실제 컴포넌트 구현
+- 9.5.4 역할별 화면 배치 확정: 차트 유형과 화면 영역 배치 최종 연결
+- 9.5.5 더미데이터 검증: 차트별 데이터 바인딩 및 가독성 검증
+- 고도화 백로그 관리: 2차 고도화 요소 별도 추적
+
+## 7. 결론
+
+최종 차트 유형 선정은 단순히 보기 좋은 시각화를 정하는 작업이 아니라, 각 KPI를 해당 화면의 사용자 목적과 구현 현실성에 맞게 가장 효과적으로 전달할 수 있는 표현 방식을 확정하는 과정이다.
+따라서 본 문서는 화면별 KPI 전체를 대상으로 최종 차트, 대안·고도화 방향, 선정 근거, 구현 단계, 데이터 요구사항 요약을 통합 정리하였으며, 후속 구현 단계에서 일관된 설계 기준으로 활용할 수 있도록 구성하였다.
+
+============================================================
+FILE: /home/orugu/Docker/Final_project_rss/docs/9.5.3 시각화 구현 우선순위 및 데이터 표현 정책서.md
+LINES: 695
+============================================================
+# 9.5.3 시각화 구현 우선순위 및 데이터 표현 정책서
+
+## 핵심 요약
+본 문서는 9.5.1 화면별 KPI 최종 구성안과 9.5.2 최종 차트 유형 선정 결과를 실제 구현 단계로 연결하기 위한 실행 기준서이다.  
+목적은 현재 프로젝트의 화면 구조, 코드 구조, 데이터 가용 범위를 기준으로 시각화 구현 우선순위를 확정하고, 각 지표를 `actual / derived / simulated` 데이터로 구분하여 화면 완성도와 데이터 정합성을 동시에 확보하는 데 있다.
+
+본 문서는 다음 5가지를 구현 기준으로 고정한다.
+
+- 현재 프런트 화면 구조 `worker / qa / manager / promo`를 유지한다.
+- 1차 구현 범위는 `KPI 카드 / 상태 배지 / 프로그레스 바 / 라인차트 / 바차트 / 도넛차트 / 로그 리스트 / 상세 테이블`을 기본 축으로 한다.
+- DB 구조 변경 없이 현재 API 및 집계 데이터로 직접 표현 가능한 항목을 우선 구현한다.
+- 부족한 표현 요소는 `actual / derived / simulated` 계층으로 분리하되, `simulated` 지표는 실제 운영 지표와 명확히 구분하여 표시한다.
+- 1차 구현에서는 표준형 시각화를 기본으로 하되, 화면 완성도와 2차 구현 수준의 인상을 확보하기 위해 일부 고도화 표현 요소를 경량 방식으로 포함한다.
+
+---
+
+## 1. 문서 목적
+
+본 문서의 목적은 다음과 같다.
+
+1. 9.5.1에서 확정한 화면별 KPI를 실제 화면 컴포넌트 단위로 변환한다.
+2. 9.5.2에서 확정한 차트 유형을 현재 프로젝트 코드 구조에 맞춰 구현 우선순위로 재정렬한다.
+3. DB 수정 없이도 화면 품질을 확보할 수 있도록 데이터 표현 정책을 정의한다.
+4. 2차 구현처럼 보이는 화면 완성도를 확보하기 위해 경량 고도화 표현의 반영 기준을 정의한다.
+5. 후속 단계인 9.5.3.x 세부 구현 작업의 기준 문서로 활용한다.
+
+---
+
+## 2. 입력 기준 문서 및 구현 전제
+
+### 2.1 입력 기준 문서
+본 정책서는 아래 문서를 직접 기준으로 사용한다.
+
+- `9.5.1-7 화면별 KPI 최종 구성안_(최종).md`
+- `9.5.2 최종 차트 유형 선정서_(최종).md`
+- `조사 계획 보강 및 최종 보고서 구조.md`
+- 현재 프런트/백엔드 추출본
+  - `web_dashboard.html`
+  - `dashboard_app.js`
+  - `dashboard_charts.js`
+  - `dashboard_api.js`
+  - `dashboard_style.css`
+  - `service.py`
+  - `router.py`
+  - DB inventory 추출본
+
+### 2.2 현재 구현 전제
+현재 대시보드는 탭 기반 단일 화면 구조로 구성되어 있으며, 작업자(`worker`), 품질관리자(`qa`), 관리자(`manager`), 생산 현황 보드(`promo`) 화면을 각각 별도 렌더 단위로 출력한다.
+
+프런트는 HTML/CSS/JavaScript 기반이며, 차트는 Chart.js 계열의 표준 시각화 중심으로 구현한다.  
+따라서 1차 구현에서는 복잡한 엔진 전체를 먼저 완성하기보다, 재사용 가능한 표준 컴포넌트와 안정적인 데이터 바인딩을 기반으로 하고, 필요한 고도화 요소는 `simulation layer`, `rule-based calculation`, `mock inference`, 경량 인터랙션 방식으로 우선 반영한다.
+
+### 2.3 구현 원칙
+- 화면 목적에 직접 연결되는 KPI만 상단 우선 영역에 배치한다.
+- 분석용 상세 정보는 차트 또는 테이블 영역으로 내린다.
+- 1차 구현은 해석이 빠른 표준형 표현을 우선 적용한다.
+- 고도화 표현은 허용하되, 실제 엔진 구현과 분리하여 경량 방식으로 반영한다.
+- 시뮬레이션 값은 실제 값처럼 보이더라도 `sourceType`과 유효기간 정책을 반드시 포함한다.
+- 공통화는 필요한 범위까지만 적용하고, 화면별 목적 차이는 override 가능하게 유지한다.
+
+---
+
+## 3. 1차 구현 확정 원칙
+
+### 3.1 유지 원칙
+- 화면 역할은 `worker / qa / manager / promo`로 고정한다.
+- 데이터 표현 계층은 `actual / derived / simulated` 3종으로 고정한다.
+- `worker`는 즉시 대응 중심, `qa`는 분석·판정 중심, `manager`는 집계·비교 중심, `promo`는 원거리 가독성 중심으로 유지한다.
+- 로그 리스트는 `worker` 우선, 상세 테이블은 `qa` 우선으로 유지한다.
+- 1차 구현에서는 화려한 연출보다 해석 속도와 데이터 정합성을 우선한다.
+- `simulated` 값은 허용하되 `actual`과 동일한 위계와 강도로 노출하지 않는다.
+- 2차 구현 인상을 주는 표현 요소는 `simulated / mock / rule-based` 방식으로 1차에 부분 반영할 수 있다.
+
+### 3.2 교체 원칙
+- `현재 불량률`은 1차 구현 기준에서 `derived`로 고정한다.
+- `manager` 화면 상단 KPI 수는 기본 3개, 최대 4개 허용으로 고정한다.
+- `promo` 1순위는 대형 KPI 3개와 단순 추세 1개를 기본으로 한다.
+- 우선순위 표기는 아래 3단계로 통일한다.
+  - `P1`: 1차 즉시 구현
+  - `P2`: 1차 보조 구현
+  - `P3`: 후순위/정교화
+- 공통화는 토큰, 포맷터, 차트 기본 옵션, 상태 배지 규칙, 빈 상태 처리 규칙까지로 제한한다.
+- 화면별 레이아웃, 문구, 정보 밀도, 차트 조합은 각 화면에서 override 가능하게 둔다.
+- `simulated` 값은 카드 제목, 보조 라벨, 배지 중 최소 2개 이상으로 실제값과 시각적으로 분리한다.
+
+### 3.3 추가 원칙
+- 데이터 상태 처리 규칙을 명확히 둔다.
+  - `null`: `N/A` 또는 `데이터 없음` 표시
+  - `0`: 정상 값으로 처리, 숨기지 않음
+  - `empty array`: 빈 상태 UI 표시
+  - `error`: 오류 문구 또는 fallback block 표시
+  - `stale`: 최신 아님 배지 또는 갱신 시각 표시
+- 단위 표기 기준을 고정한다.
+  - 비율: `%`
+  - 개수: `건`
+  - 수량: `ea` 또는 `pcs` 중 하나로 문서 전체 통일
+  - 시간: `분`
+- 시간 기준을 고정한다.
+  - `최근 10분`: 현재 시각 기준 직전 10분
+  - `당일`: 로컬 날짜 00:00~현재
+  - `시간대별`: 당일 시간 버킷 기준
+  - `전일 비교`: 전일 동일 시간대 기준
+- `derived` 계산 책임은 가능하면 BE/API 우선, 불가 시 FE 계산으로 한다.
+- 1차 구현에서 FE 계산 허용 범위는 아래로 제한한다.
+  - 비율 계산
+  - Top N 집계 재정렬
+  - 단순 진행률
+  - 현재 속도 기반 예상 종료 생산량
+- `simulated` 최소 메타 필드는 아래로 고정한다.
+  - `sourceType`
+  - `assumption`
+  - `validUntil`
+  - `modelVersion`
+  - `caution`
+- 데이터 없음/null/stale 처리는 공통 컴포넌트에서 1차 처리하고, 화면별 호출부는 문구만 override한다.
+- 고도화 요소는 실제 데이터 엔진과 분리하여 프런트 표현 계층 또는 simulation layer에서 우선 반영한다.
+
+---
+
+## 4. 화면별 구현 우선순위 정책
+
+## 4.1 현장 대시보드 (SCR-001 / worker)
+
+### 화면 목적
+현장 대시보드는 실시간 상태 모니터링과 즉시 대응이 핵심이다.  
+작업자가 화면 진입 직후 설비 상태 이상 여부, 최근 불량 급증 여부, 현재 생산 진척도를 빠르게 판단할 수 있어야 한다.
+
+### 1차 구현 기준
+#### P1
+- 최근 10분 NG 발생 건수: KPI 카드
+- 설비 가동 상태: 상태 배지
+- 목표 달성률: 프로그레스 바 카드
+- 누적 생산량: KPI 카드
+- 실시간 NG 로그: 로그 리스트
+- 핵심 KPI 보조 스파크라인
+- KPI 숫자 카운트업 애니메이션
+- 단순 게이지형 진행률 표현
+
+#### P2
+- 최근 발생 유형 Top 3: 수평 바차트
+- 보조 품질 블록: 현재 불량률 또는 경고 문구
+- 경고 배너 고도화
+- 상태 기반 룰형 인사이트 문구
+
+#### P3
+- 미니 추세선 고도화
+- 애니메이션 세부 정교화
+- 예측 경고 표현 확대
+
+### 구현 정책
+- `worker` 화면 상단은 카드와 배지 중심으로 간단하게 유지한다.
+- 즉시 조치와 직접 연결되지 않는 복잡한 분석형 차트는 하단 보조 영역으로 둔다.
+- 불량 원인 분석보다 “지금 멈춰야 하는가 / 점검해야 하는가”에 초점을 둔다.
+- 최대 정보량은 상단 KPI/배지 4~5개, 로그 1개, 보조 차트 1개 수준으로 제한한다.
+- 고도화 표현은 판단을 빠르게 돕는 범위 내에서만 허용한다.
+
+---
+
+## 4.2 품질 대시보드 (SCR-002 / qa)
+
+### 화면 목적
+품질 대시보드는 현재 품질 수준, 주요 불량 원인, 재검 대상을 함께 판단하는 화면이다.  
+즉, 현재 상태, 원인 분석, 상세 판정 조회가 동시에 가능해야 한다.
+
+### 1차 구현 기준
+#### P1
+- 현재 불량률: KPI 카드
+- 주요 불량 유형 Top 5: 수평 바차트
+- 시간대별 불량률 추이: 라인차트
+- 재검 필요 수량: KPI 카드
+- NG 검출 리스트: 상세 테이블
+- 점선 예측 구간 시각화
+- 이미지 썸네일 확장
+- 판정 보조 인사이트 문구
+
+#### P2
+- 검사 현황 요약: 묶음형 정보 카드
+- 신뢰도/판정 상태 배지 규칙 강화
+- 전일 비교 또는 기준선 강조
+- 예측 불량률 카드
+
+#### P3
+- 이미지 확장 UX 정교화
+- 기준선/예측선 시각 강화
+- 상세 인사이트 영역 확장
+
+### 구현 정책
+- `qa` 화면은 카드보다 차트와 테이블 비중을 높인다.
+- 불량 유형, 추세, 판정 리스트의 연결성이 유지되도록 구성한다.
+- 예측형 지표는 실제 측정값과 시각적으로 분리한다.
+- 최대 정보량은 상단 KPI 2~3개, 차트 2개, 테이블 1개 수준으로 제한한다.
+- 이미지, 예측, 인사이트는 실제 ML/LLM 연동이 아니라 1차에서는 simulation 또는 rule-based 방식으로 반영한다.
+
+---
+
+## 4.3 통합 대시보드 (SCR-003 / manager)
+
+### 화면 목적
+통합 대시보드는 전사 관점의 성과 비교와 운영 판단이 핵심이다.  
+관리자는 전체 효율, 계획 대비 실적, 라인 간 편차, 운영 리스크를 빠르게 파악해야 한다.
+
+### 1차 구현 기준
+#### P1
+- 전체 라인 OEE: KPI 카드
+- 공장 전체 목표 달성률: KPI 카드 또는 프로그레스 카드
+- 예상 종료 생산량: KPI 카드
+- 라인별 생산량 비교: 바차트
+- 시간대별 생산량 / 불량률 추이: 복수 시계열 라인차트
+- 단순 게이지형 OEE 강조 표현
+- 병목 흐름 표현용 단순 시각화
+- 위험도/요약 인사이트 문구
+
+#### P2
+- 라인 상태 분포: 도넛차트
+- 다운타임/손실 원인 비교: 바차트 또는 파레토 대체 구조
+- 보조 KPI 1개 추가
+- 불량 위험도 예측 카드
+- 2D 디지털 트윈형 상태 보드
+
+#### P3
+- 예측 구간 정교화
+- 흐름 시각화 확장
+- 비교 시각화 고도화
+
+### 구현 정책
+- `manager` 화면은 상단 KPI 기본 3개, 최대 4개까지만 허용한다.
+- 관리자는 한 라인보다 공장 전체 흐름과 비교를 봐야 하므로 단일 상세보다 집계와 비교를 우선한다.
+- OEE와 목표 달성률은 전사 집계 기준으로 명확히 구분한다.
+- 최대 정보량은 상단 KPI 3~4개, 비교 차트 2~3개 수준으로 제한한다.
+- 병목 흐름, 위험도, 상태 보드는 1차에서 경량 버전으로 우선 구현한다.
+
+---
+
+## 4.4 생산 현황 보드 (SCR-004 / promo)
+
+### 화면 목적
+생산 현황 보드는 공용 송출 화면으로, 복잡한 분석보다 원거리 시인성과 즉시 이해 가능성이 우선이다.  
+세부 해석보다 핵심 수치와 주의할 품질 이슈를 짧게 전달해야 한다.
+
+### 1차 구현 기준
+#### P1
+- 누적 총 생산량: 대형 KPI 카드
+- 목표 달성률: 대형 KPI 카드
+- 당일 양품률: KPI 카드
+- 시간대별 생산 추이: 단순 라인차트
+- KPI 숫자 카운트업 애니메이션
+- 자동 롤링 문구
+- 자동 페이지 전환
+
+#### P2
+- TOP 3 Defect Class: 요약형 리스트 또는 단순 바차트
+- 자동 시계
+- 강조 색상 조정
+- 대형 상태 메시지 블록
+
+#### P3
+- 애니메이션 강화
+- 전광판형 연출 정교화
+- 보조 장면 전환 개선
+
+### 구현 정책
+- `promo` 화면은 멀리서도 읽히는 숫자와 짧은 텍스트 중심으로 구성한다.
+- 긴 테이블, 복잡한 범례, 작은 축 라벨은 사용하지 않는다.
+- 결함 정보는 보조 수준으로만 노출하고, 생산/달성률/양품률을 우선한다.
+- 최대 정보량은 대형 KPI 3개와 단순 추세 1개 수준으로 제한한다.
+- 자동 롤링, 자동 전환, 카운트업은 시인성 강화 목적 범위 내에서 허용한다.
+
+---
+
+## 5. 데이터 표현 정책
+
+## 5.1 데이터 유형 구분 목적
+현재 프로젝트는 DB 구조를 즉시 확장하기 어려운 조건이 있으므로, 화면에 표현되는 지표를 생성 방식 기준으로 분리 관리해야 한다.  
+이를 위해 모든 KPI, 차트, 인사이트는 아래 3개 `sourceType` 중 하나를 반드시 가진다.
+
+- `actual`
+- `derived`
+- `simulated`
+
+---
+
+## 5.2 actual 데이터 정의
+
+### 정의
+DB 또는 API 응답에서 직접 조회되거나, 단순 집계만으로 바로 산출 가능한 값
+
+### 포함 기준
+- 원본 테이블 또는 API 응답에 직접 존재
+- 해석상 추가 가정이 없음
+- 같은 시점에 재조회하면 동일 결과를 기대할 수 있음
+
+### 예시
+- 최근 10분 NG 발생 건수
+- 설비 가동 상태
+- 누적 생산량
+- 총 검사 수량
+- 양품 수
+- 불량 수
+- 라인별 생산량 비교의 원본 값
+
+### 정책
+- `actual` 값은 화면의 기본 진실값으로 간주한다.
+- 상태 배지, KPI 카드, 로그 리스트, 상세 테이블의 우선 입력값으로 사용한다.
+
+---
+
+## 5.3 derived 데이터 정의
+
+### 정의
+원본 데이터를 조합하거나 규칙 기반 계산을 적용해 산출한 파생 지표
+
+### 포함 기준
+- `actual` 데이터 조합으로 계산 가능
+- 계산식과 기준 시점이 명확함
+- 추가 추론 없이 재현 가능함
+
+### 예시
+- 현재 불량률
+- 목표 달성률
+- OEE
+- 시간대별 불량률
+- 라인 상태 분포
+- Top N Defect 집계
+- 예상 종료 생산량(현재 속도 기준 단순 추정)
+
+### 정책
+- `derived` 값은 계산식과 기준 필드를 문서화해야 한다.
+- `actual`과 혼동되지 않도록 계산값 성격을 내부적으로 구분한다.
+- 계산식이 불안정한 경우 카드보다 보조 지표로 우선 배치한다.
+- 계산 책임은 가능하면 BE/API 우선으로 하고, 불가 시 FE 계산으로 처리한다.
+
+---
+
+## 5.4 simulated 데이터 정의
+
+### 정의
+현재 DB/API 범위로는 직접 확보되지 않지만, 화면 완성도와 2차 구현 표현을 위해 규칙 기반 또는 시범형 형태로 생성한 값
+
+### 포함 기준
+- 실제 저장 데이터가 아님
+- 화면 시연 또는 고도화 개념 표현 목적
+- 가정, 버전, 유효기간, 주의 문구가 함께 제공됨
+
+### 예시
+- 예측 불량률
+- 불량 위험도 예측
+- 재산출 필요 표시가 있는 인사이트 카드
+- 룰 기반 추천 또는 리스크 경고 문구
+- mock inference 기반 요약 텍스트
+- 2D 디지털 트윈형 상태 표현
+
+### 정책
+- `simulated` 값은 반드시 `sourceType: simulated`를 유지한다.
+- 실제 운영 KPI와 동일 위치 및 강도로 표시하지 않는다.
+- 아래 메타를 반드시 포함한다.
+  - `sourceType`
+  - `assumption`
+  - `validUntil`
+  - `modelVersion`
+  - `caution`
+- 카드 제목, 보조 라벨, 배지 중 최소 2개 이상으로 실제값과 시각적으로 분리한다.
+- 유효기간 만료 시 재산출 필요 상태로 전환한다.
+- 1차 구현에서는 실제 모델 서빙이 아니라 `simulation layer`, `rule-based logic`, `mock inference` 방식으로 구현할 수 있다.
+
+---
+
+## 6. 상태 처리 및 단위 정책
+
+## 6.1 데이터 상태 처리 규칙
+모든 공통 컴포넌트는 아래 상태를 기본 처리해야 한다.
+
+- `null`: `N/A` 또는 `데이터 없음`
+- `0`: 정상 값으로 표시
+- `empty array`: 빈 상태 UI 표시
+- `error`: 오류 문구 또는 fallback block 표시
+- `stale`: `최신 아님` 배지 또는 갱신 시각 표시
+
+상태 처리는 공통 컴포넌트에서 1차 처리하고, 화면별 호출부는 문구만 override한다.
+
+## 6.2 단위 표기 규칙
+문서와 UI 전체에서 아래 기준을 통일한다.
+
+- 비율: `%`
+- 개수: `건`
+- 수량: `ea` 또는 `pcs` 중 1종으로 통일
+- 시간: `분`
+
+## 6.3 시간 기준 규칙
+- 최근 10분: 현재 시각 기준 직전 10분
+- 당일: 로컬 날짜 00:00~현재
+- 시간대별: 당일 시간 버킷 기준
+- 전일 비교: 전일 동일 시간대 기준
+
+---
+
+## 7. 컴포넌트별 적용 정책
+
+## 7.1 KPI 카드
+
+### 적용 대상
+- 단일 수치의 현재 상태 전달
+- 즉시 해석이 필요한 핵심 지표
+
+### 우선 적용 화면
+- worker
+- qa
+- manager
+- promo
+
+### 사용 원칙
+- 상단 요약 영역에 배치한다.
+- 상태 텍스트, 보조 문구, 단위 표기를 일관되게 적용한다.
+- 화면별 최대 카드 수를 초과하지 않는다.
+- `simulated` 카드에는 별도 식별 표기를 반드시 포함한다.
+- 필요 시 경량 스파크라인, 카운트업, 단순 게이지 표현을 보조로 포함할 수 있다.
+
+---
+
+## 7.2 상태 배지
+
+### 적용 대상
+- 설비 상태
+- 판정 상태
+- 로그 상태
+- 위험도 단계
+
+### 사용 원칙
+- `RUN / IDLE / DOWN`, `PASS / NG / CHECK` 등 상태 체계를 표준화한다.
+- 색상은 상태 의미를 전달하는 범위에서만 제한적으로 사용한다.
+- 본문 강조용 장식 색상으로 남용하지 않는다.
+
+---
+
+## 7.3 프로그레스 바 및 게이지형 표현
+
+### 적용 대상
+- 목표 달성률
+- 잔량/진척도
+- 기준 대비 현황
+- OEE 강조 표현
+
+### 사용 원칙
+- `worker`, `manager`, `promo` 화면에서 우선 사용한다.
+- 1차 구현에서는 복합 게이지가 아니라 단순 진행률형, 반원형, 도넛형 수준으로 제한한다.
+- 색상보다 진행률 해석을 우선한다.
+
+---
+
+## 7.4 라인차트
+
+### 적용 대상
+- 시간대별 생산량 추이
+- 시간대별 불량률 추이
+- 목표선 또는 전일 비교
+- 예측 구간 표시
+
+### 사용 원칙
+- 시계열 해석이 필요한 영역에만 사용한다.
+- `promo` 화면은 축과 범례를 단순화한다.
+- 예측값은 실측값과 선 스타일 또는 영역을 분리한다.
+- 축 범위 이상치, 데이터 없음, 단위 불일치 처리를 공통 옵션에서 관리한다.
+- 점선 예측 구간은 simulated 데이터에만 적용한다.
+
+---
+
+## 7.5 바차트
+
+### 적용 대상
+- 주요 불량 유형 Top N
+- 라인별 생산량 비교
+- 원인별 비교
+- 단계별 병목 비교
+
+### 사용 원칙
+- 긴 라벨은 수평 바차트 우선으로 한다.
+- 순위 비교는 bar가 donut보다 우선이다.
+- 불량 유형 Top 3/5 구조에 재사용 가능해야 한다.
+- 항목 수가 과도하면 Top N으로 절단하고 나머지는 기타로 처리할 수 있다.
+
+---
+
+## 7.6 도넛차트
+
+### 적용 대상
+- 구성비 또는 상태 분포
+- 라인 상태 분포
+- 검사 결과 비중
+
+### 사용 원칙
+- 비율 전달이 목적일 때만 사용한다.
+- 항목 수가 많으면 bar로 대체한다.
+- 표시는 단순하게 유지하고 범례는 보조 정보로 사용한다.
+
+---
+
+## 7.7 로그 리스트
+
+### 적용 대상
+- 실시간 NG 로그
+- 최근 이벤트
+- 알람 이력
+
+### 사용 원칙
+- `worker` 화면 우선으로 적용한다.
+- 최신순 정렬을 유지한다.
+- 시간 / 라인 / 상태 / 메시지 중심의 최소 정보만 표시한다.
+- 조치 판단이 가능할 정도의 정보만 남기고 과도한 상세값은 제외한다.
+- promo에서는 세부 로그 대신 롤링 요약 문구로 축약할 수 있다.
+
+---
+
+## 7.8 상세 테이블 및 썸네일 확장
+
+### 적용 대상
+- NG 검출 리스트
+- 검사 결과 목록
+- 상세 품질 이력
+- 이미지 기반 검출 결과
+
+### 사용 원칙
+- `qa` 화면 우선으로 적용한다.
+- `datetime / id / status / percent` 유형별 셀 렌더링 규칙을 통일한다.
+- 긴 텍스트는 `title` 보조 처리, 숫자는 우측 정렬한다.
+- 이미지 썸네일은 1차에서 모달 확장 수준으로 구현한다.
+- 상세 테이블은 신규 발명보다 기존 구조 정리를 우선한다.
+
+---
+
+## 7.9 인사이트 문구 및 자동 전환 표현
+
+### 적용 대상
+- 위험도 요약
+- 예측 요약
+- 경고 문구
+- 공용 송출용 롤링 메시지
+
+### 사용 원칙
+- 1차에서는 실제 생성형 AI 연동이 아니라 룰 기반 문장 조합 또는 mock inference 방식으로 구현한다.
+- actual 지표를 덮어쓰지 않고 보조 해석 영역으로만 사용한다.
+- promo 화면의 자동 롤링 및 자동 페이지 전환은 시인성 강화 목적 범위로 제한한다.
+
+---
+
+## 7.10 2D 상태 보드 및 경량 디지털 트윈형 표현
+
+### 적용 대상
+- 라인 상태 맵
+- 설비 상태 보드
+- 관리자용 운영 현황 요약
+
+### 사용 원칙
+- 1차 구현에서는 3D 엔진이 아니라 2D 레이아웃 기반 상태 보드 수준으로 구현한다.
+- 실제 디지털 트윈 엔진으로 오인되지 않도록 표현 범위를 제한한다.
+- 상태 변화와 병목 위치를 직관적으로 보여주는 수준에 집중한다.
+
+---
+
+## 8. 구현 우선순위 종합표
+
+| 화면 | 컴포넌트 | 데이터 유형 | 우선순위 | 구현 방침 |
+|---|---|---|---|---|
+| worker | 최근 10분 NG 발생 건수 카드 | actual | P1 | 즉시 구현 |
+| worker | 설비 가동 상태 배지 | actual | P1 | 즉시 구현 |
+| worker | 목표 달성률 프로그레스 | derived | P1 | 즉시 구현 |
+| worker | 누적 생산량 카드 | actual | P1 | 즉시 구현 |
+| worker | 실시간 NG 로그 리스트 | actual | P1 | 즉시 구현 |
+| worker | KPI 스파크라인 | derived | P1 | 경량 고도화 포함 |
+| worker | KPI 카운트업 애니메이션 | simulated 표현 | P1 | 경량 고도화 포함 |
+| worker | 단순 게이지형 진행률 | derived | P1 | 경량 고도화 포함 |
+| worker | 최근 발생 유형 Top 3 바차트 | derived | P2 | 보조 영역 구현 |
+| worker | 보조 품질 블록 | derived | P2 | 보조 영역 구현 |
+| qa | 현재 불량률 카드 | derived | P1 | 즉시 구현 |
+| qa | 주요 불량 유형 Top 5 바차트 | derived | P1 | 즉시 구현 |
+| qa | 시간대별 불량률 추이 라인차트 | derived | P1 | 즉시 구현 |
+| qa | 재검 필요 수량 카드 | derived | P1 | 즉시 구현 |
+| qa | NG 검출 리스트 테이블 | actual | P1 | 즉시 구현 |
+| qa | 점선 예측 구간 | simulated | P1 | 경량 고도화 포함 |
+| qa | 이미지 썸네일 확장 | actual/simulated 표시 | P1 | 경량 고도화 포함 |
+| qa | 판정 보조 인사이트 문구 | simulated | P1 | 룰 기반 구현 |
+| qa | 검사 현황 요약 카드 | actual/derived | P2 | 1차 보조 구현 |
+| qa | 예측 불량률 카드 | simulated | P2 | 분리 표기 |
+| manager | 전체 라인 OEE 카드 | derived | P1 | 즉시 구현 |
+| manager | 공장 전체 목표 달성률 카드 | derived | P1 | 즉시 구현 |
+| manager | 예상 종료 생산량 카드 | derived | P1 | 즉시 구현 |
+| manager | 라인별 생산량 비교 바차트 | actual | P1 | 즉시 구현 |
+| manager | 시간대별 생산량/불량률 라인차트 | actual + derived | P1 | 즉시 구현 |
+| manager | 단순 게이지형 OEE 강조 | derived | P1 | 경량 고도화 포함 |
+| manager | 병목 흐름 단순 시각화 | derived/simulated | P1 | 경량 고도화 포함 |
+| manager | 위험도/요약 인사이트 문구 | simulated | P1 | 룰 기반 구현 |
+| manager | 라인 상태 분포 도넛차트 | derived | P2 | 1차 보조 구현 |
+| manager | 다운타임/손실 원인 비교 | derived | P2 | 1차 보조 구현 |
+| manager | 2D 상태 보드 | simulated + actual | P2 | 경량 디지털 트윈형 |
+| promo | 누적 총 생산량 카드 | actual | P1 | 즉시 구현 |
+| promo | 목표 달성률 카드 | derived | P1 | 즉시 구현 |
+| promo | 당일 양품률 카드 | derived | P1 | 즉시 구현 |
+| promo | 시간대별 생산 추이 라인차트 | actual | P1 | 단순형 구현 |
+| promo | KPI 카운트업 애니메이션 | simulated 표현 | P1 | 경량 고도화 포함 |
+| promo | 자동 롤링 문구 | simulated/derived | P1 | 경량 고도화 포함 |
+| promo | 자동 페이지 전환 | UI 동작 | P1 | 경량 고도화 포함 |
+| promo | TOP 3 Defect Class | derived | P2 | 보조 정보로 구현 |
+| promo | 자동 시계 | actual | P2 | 보조 구현 |
+
+---
+
+## 9. 고도화 요소 반영 기준 및 제외 범위
+
+### 9.1 1차 구현에 포함하는 고도화 표현 항목
+다음 항목은 화면 완성도와 2차 구현 수준의 인상을 확보하기 위해 1차 구현 범위에 포함한다.  
+단, 실제 고도화 엔진 전체를 구현하는 것이 아니라 경량 표현 또는 시뮬레이션 방식으로 우선 반영한다.
+
+- 게이지 차트
+- 스파크라인 카드
+- 카드 카운트업 애니메이션
+- 자동 롤링 문구
+- 자동 페이지 전환
+- 이미지 썸네일 확장
+- 병목 흐름 표현용 단순 시각화
+- 점선 예측 구간 시각화
+- 예측/위험도/요약용 simulated 인사이트 문구
+- 디지털 트윈형 2D 상태 표현
+
+### 9.2 1차 구현에서의 반영 방식
+- 게이지 차트는 복합형이 아니라 단순 진행률형으로 구현한다.
+- 스파크라인 카드는 KPI 보조 추세선 수준으로 제한한다.
+- 카운트업 애니메이션은 핵심 KPI에만 제한 적용한다.
+- 자동 롤링과 자동 페이지 전환은 promo 화면 중심으로 우선 적용한다.
+- 이미지 썸네일은 qa 화면에서 모달 확장 수준으로 구현한다.
+- 병목 흐름 시각화는 복잡한 샌키 대신 단순 단계 비교형으로 우선 구현한다.
+- 점선 예측 구간은 simulated 데이터에만 적용한다.
+- 인사이트 문구는 실제 생성형 AI 연동이 아니라 룰 기반 문장 생성 또는 mock inference 방식으로 구현한다.
+- 디지털 트윈형 표현은 3D 구현이 아니라 라인/설비 상태를 보여주는 2D 보드 수준으로 구현한다.
+
+### 9.3 1차 구현에서 제외하는 항목
+다음 항목은 1차 범위에서 제외한다.
+
+- 실제 모델 학습/서빙 파이프라인 구축
+- 외부 생성형 AI 연동
+- 3D 디지털 트윈 엔진
+- 고복잡도 멀티축 분석 대시보드 전면 적용
+- 모든 차트를 하나의 함수로 강제 통합하는 수준의 과도한 공통화
+
+---
+
+## 10. 세부 구현 단계 연결
+
+본 정책서는 아래 9.5.3.x 세부 작업의 직접 기준으로 사용한다.
+
+- 9.5.3.1 공통 UI 규칙 정의
+- 9.5.3.2 상태 색상 및 배지 규칙 정리
+- 9.5.3.3 KPI 카드 구현
+- 9.5.3.4 프로그레스 바 및 게이지형 표현 구현
+- 9.5.3.5 라인차트 및 예측 구간 표현 구현
+- 9.5.3.6 바차트 및 병목 비교 시각화 구현
+- 9.5.3.7 도넛차트 및 상태 분포 표현 구현
+- 9.5.3.8 로그 리스트 및 롤링 메시지 구현
+- 9.5.3.9 상세 테이블 및 썸네일 확장 구현
+- 9.5.3.10 차트 공통 유틸 정리
+- 9.5.3.11 더미데이터 바인딩 및 simulation layer 점검
+
+후속 코드 생성 단계는 `P1 항목 우선 구현`을 기준으로 진행하고, `P2`는 보조 구현, `P3`는 정교화 항목으로 관리한다.
+
+---
+
+## 11. 부록 A. 리서치 기반 설계 판단 요약
+
+### A-1. 역할별 정보 위계
+- 작업자 화면은 즉시 조치 중심
+- 품질 화면은 원인 분석과 판정 중심
+- 관리자 화면은 비교와 자원 배분 중심
+- 공용 보드는 시인성과 공유 중심
+
+### A-2. ISA-101 / 고성능 HMI 반영 원칙
+- 정상 상태는 절제되게 표현
+- 이상 상태는 빠르게 식별되도록 강조
+- 과도한 장식, 불필요한 애니메이션, 복잡한 3D 연출은 지양
+- 숫자는 맥락과 함께 보여주고, 해석이 빠른 형태를 우선 적용
+
+### A-3. 본 프로젝트 적용 결론
+- 1차 구현은 카드, 배지, 프로그레스, 라인차트, 바차트, 로그, 테이블 중심으로 간다.
+- 동시에 화면 완성도 향상에 필요한 경량 고도화 표현을 제한적으로 포함한다.
+- 예측 및 인사이트성 요소는 `simulated` 계층으로 분리한다.
+- 현재 DB/API 범위를 벗어나는 실제 엔진 구현은 보류하되, 화면 구조상 자리는 남겨둘 수 있다.
+- 공통화는 재사용성과 유지보수성을 높이는 범위까지만 적용하고, 화면 역할 차이는 보존한다.
+
+---
+
+## 12. 최종 결론
+
+본 단계의 시각화 구현은 많이 보여주는 것보다 역할에 맞는 핵심 정보를 빠르게 해석하게 하는 것을 목표로 한다.  
+따라서 1차 구현은 `actual / derived` 중심의 표준 시각화를 기반으로 완성도를 확보하고, `simulated` 지표와 경량 고도화 표현을 활용해 2차 구현 수준의 인상을 부분적으로 반영한다.
+
+이는 실제 예측 엔진, 디지털 트윈 엔진, 외부 생성형 AI 연동을 완성하는 것을 의미하지 않는다.  
+1차 단계에서는 `simulation layer`, `rule-based calculation`, `mock inference`, 경량 인터랙션을 활용한 표현 중심 구현으로 한정한다.
+
+이 기준에 따라 후속 구현은 공통 토큰과 공통 규칙을 먼저 정리한 뒤, `worker → qa → manager → promo` 순으로 화면별 바인딩을 진행한다.  
+코드 생성 단계에서는 `P1` 항목을 우선 구현하고, `P2`와 `P3`는 범위 관리 하에 순차적으로 확장한다.
+
+============================================================
+FILE: /home/orugu/Docker/Final_project_rss/docs/9.5.3.11_더미데이터_바인딩_적용정리.md
+LINES: 86
+============================================================
+# 9.5.3.11 더미데이터 바인딩 적용 정리
+
+## 1. 작업 목적
+- 1차 구현 범위 기준으로 대시보드 더미데이터 바인딩을 정리하고 화면별 렌더/예외 처리 기준을 고정한다.
+
+## 2. 기준 문서
+- 기준 고정: `9.5.3.1_차트테이블_구현_대상_목록.md`
+- 보조 참조: `9.5.3.2` ~ `9.5.3.10`
+
+## 3. 1차 구현 확정 범위
+- SCR-001: 최근 10분 NG 발생 건수, 목표 달성률, 누적 생산량, 설비 가동 상태, 실시간 NG 로그, 최근 발생 유형 Top 3
+- SCR-002: 현재 불량률, 검사 현황 요약, 주요 불량 유형 Top 5, 시간대별 불량률 추이, NG 검출 리스트
+- SCR-003: 공장 목표 달성률, 라인별 생산량 비교, 시간대별 생산·불량 추이
+- SCR-004: 누적 총 생산량, 당일 양품률, 목표 달성률, TOP 3 Defect Class, 시간대별 생산 추이
+
+## 4. 제외 범위(이번 단계 미포함)
+- Worker 도넛차트
+- Worker 라인차트
+- Manager 도넛차트
+- Manager 상세 테이블
+- QA 도넛차트
+- Manager 게이지/위험도 예측
+- QA 예측 불량률
+- Manager 예상 종료량
+- OEE
+- 재검 필요 수량
+- 설비 상태의 equipment.status 기반 해석
+- PASS/CHECK 포함 전체 검사 결과 테이블
+
+## 5. 적용 원칙
+- 렌더 흐름은 `fetchAll -> activateTab -> render* / render*Chart` 유지
+- KPI 스키마는 화면별 `key/title/value/unit/helperText/trendType/trendValue/status/statusText`로 통일
+- 상태 스키마는 `statusData.worker.equipment_status` 구조로 통일
+- 단위는 문자열 결합이 아닌 `value + unit` 분리 원칙 적용
+- 예외 처리 기준:
+- `0`은 정상 출력
+- `null/undefined`는 fallback(`-` 또는 `데이터 없음`) 출력
+- `[]`는 empty-state 문구 출력
+
+## 6. 실제 변경 파일
+- `nginx/html/js/wed_dashboard/dashboard_api.js`
+- `nginx/html/js/wed_dashboard/dashboard_charts.js`
+- `nginx/html/js/wed_dashboard/dashboard_app.js`
+- `nginx/html/web_dashboard.html`
+- `nginx/html/css/wed_dashboard/dashboard_style.css`
+
+## 7. 반영 핵심
+- API:
+- `fetchAll` 반환 키를 `summary/lines/defects/hourly/ngList/kpiCards/statusData`로 정리
+- `MOCK_KPI_CARDS`를 화면별 객체(`worker/qa/manager/promo`)로 구성
+- `MOCK_NG_LIST`는 기존 키(`time/board_id/cls/conf`) 유지
+- Charts:
+- `renderCanvasEmpty` 추가
+- `renderWorkerTopDefectBarChart` 추가
+- QA/Manager/Promo 차트 함수에 empty-state 및 `0`값 처리 반영
+- App:
+- Worker/QA/Manager/Promo 렌더 함수 교체
+- `activateTab` 교체로 1차 범위만 렌더 호출
+- QA 하단은 `renderDetailTable` 기반 `NG 검출 리스트`로 구성
+- HTML/CSS:
+- 탭 헤더/스크립트 로드 구조 정리
+- `.list-empty`, `.promo-top-item` 스타일 추가
+
+## 8. 확인 체크리스트
+### 8.1 공통
+- [ ] 탭 전환 시 렌더 오류 없음
+- [ ] 빈 데이터 시 차트/리스트/테이블 empty-state 표시
+- [ ] 숫자/시간/상태 셀 포맷 정상
+- [ ] 긴 텍스트 ellipsis 유지
+- [ ] 상세 테이블 내부 스크롤/가로 스크롤 정상
+
+### 8.2 화면별
+- [ ] Worker: KPI 3개, 설비 가동 상태, Top3 바, 실시간 NG 로그만 표시
+- [ ] QA: KPI 2개, 불량률 라인, Top5 바, NG 검출 리스트만 표시
+- [ ] Manager: KPI 1개, 생산·불량 추이, 라인별 생산량 비교만 표시
+- [ ] Promo: KPI 3개, TOP3 Defect, 생산 추이, 시계만 표시
+
+### 8.3 회귀
+- [ ] 콘솔 에러 없음
+- [ ] 탭 반복 전환 시 차트 중복 생성/메모리 누수 없음
+- [ ] 비대상 화면/기능에 영향 없음
+
+## 9. 후속 보완(1차 안정화 성격)
+- 화면별 데이터 기준 시각(집계 기준) 1줄 표시
+- 차트/리스트 공통 빈 데이터/오류 문구 추가 통일
+- QA 테이블 상단 총 건수 1개 표시
+
+

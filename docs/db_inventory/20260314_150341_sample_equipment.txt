@@ -1,0 +1,4 @@
+ equipment_id | equipment_name | status | last_checked_at | line_id 
+--------------+----------------+--------+-----------------+---------
+(0 rows)
+

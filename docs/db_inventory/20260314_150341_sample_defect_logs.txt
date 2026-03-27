@@ -1,0 +1,4 @@
+ defect_id | line_id | model_id | detected_by | defect_class | inspection_qty | good_qty | recorded_at | defect_qty 
+-----------+---------+----------+-------------+--------------+----------------+----------+-------------+------------
+(0 rows)
+

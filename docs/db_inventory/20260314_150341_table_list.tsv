@@ -1,0 +1,15 @@
+public	defect_logs
+public	defect_type
+public	environment_logs
+public	equipment
+public	face_embedding_table
+public	items
+public	lines
+public	ml_predictions
+public	notifications
+public	product_models
+public	production_logs
+public	prompt_permission_list
+public	user_table
+public	vector_table
+public	vision_result

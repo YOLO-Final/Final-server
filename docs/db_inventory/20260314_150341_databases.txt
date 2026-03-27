@@ -1,0 +1,11 @@
+                                                          List of databases
+       Name       |  Owner   | Encoding | Locale Provider |  Collate   |   Ctype    | ICU Locale | ICU Rules |   Access privileges   
+------------------+----------+----------+-----------------+------------+------------+------------+-----------+-----------------------
+ Final_Project_DB | FP_ADMIN | UTF8     | libc            | en_US.utf8 | en_US.utf8 |            |           | 
+ postgres         | FP_ADMIN | UTF8     | libc            | en_US.utf8 | en_US.utf8 |            |           | 
+ template0        | FP_ADMIN | UTF8     | libc            | en_US.utf8 | en_US.utf8 |            |           | =c/FP_ADMIN          +
+                  |          |          |                 |            |            |            |           | FP_ADMIN=CTc/FP_ADMIN
+ template1        | FP_ADMIN | UTF8     | libc            | en_US.utf8 | en_US.utf8 |            |           | =c/FP_ADMIN          +
+                  |          |          |                 |            |            |            |           | FP_ADMIN=CTc/FP_ADMIN
+(4 rows)
+

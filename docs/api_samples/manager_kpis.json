@@ -1,0 +1,47 @@
+{
+  "screen": "manager",
+  "screenId": "SCR-003",
+  "dataMode": "mock",
+  "effectiveAt": "2026-03-14T15:00:00+09:00",
+  "updatedAt": "2026-03-14T15:00:10+09:00",
+  "kpis": {
+    "items": [
+      {
+        "key": "mgr_oee",
+        "label": "전체 라인 OEE",
+        "value": 71.2,
+        "unit": "%",
+        "sourceType": "derived"
+      },
+      {
+        "key": "mgr_achievement",
+        "label": "목표 달성률",
+        "value": 66.0,
+        "unit": "%",
+        "sourceType": "derived"
+      },
+      {
+        "key": "mgr_expected_output",
+        "label": "예상 종료 생산량",
+        "value": 18600,
+        "unit": "pcs",
+        "sourceType": "derived"
+      }
+    ]
+  },
+  "insights": {
+    "items": [
+      {
+        "key": "mgr_risk",
+        "label": "운영 리스크 수준",
+        "value": 54,
+        "status": "warning",
+        "severity": "warning",
+        "sourceType": "simulated",
+        "reasonSummary": "라인 C,D 생산 편차 확대",
+        "confidence": 0.68,
+        "validUntil": "2026-03-14T16:00:00+09:00"
+      }
+    ]
+  }
+}

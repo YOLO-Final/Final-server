@@ -1,0 +1,60 @@
+Web Dashboard Review Targets Manifest
+
+Created: 2026-03-24
+Project Root: /home/orugu/Docker/Final_project_rss
+ZIP File: /home/orugu/Docker/Final_project_rss/review_txt/web_dashboard_review_targets_2026-03-24.zip
+
+[Included Folders]
+/home/orugu/Docker/Final_project_rss/review_txt
+/home/orugu/Docker/Final_project_rss/docs
+/home/orugu/Docker/Final_project_rss/nginx/conf.d
+/home/orugu/Docker/Final_project_rss/nginx/html
+/home/orugu/Docker/Final_project_rss/nginx/html/css/wed_dashboard
+/home/orugu/Docker/Final_project_rss/nginx/html/js/web_login
+/home/orugu/Docker/Final_project_rss/nginx/html/js/wed_dashboard
+/home/orugu/Docker/Final_project_rss/server_api
+/home/orugu/Docker/Final_project_rss/server_api/sql
+/home/orugu/Docker/Final_project_rss/server_api/src
+/home/orugu/Docker/Final_project_rss/server_api/src/modules
+/home/orugu/Docker/Final_project_rss/server_api/src/modules/auth
+/home/orugu/Docker/Final_project_rss/server_api/src/modules/auth/db
+/home/orugu/Docker/Final_project_rss/server_api/src/modules/dashboard
+/home/orugu/Docker/Final_project_rss/server_api/src/modules/dashboard/db
+
+[Included Files]
+/home/orugu/Docker/Final_project_rss/nginx/html/web_dashboard.html
+/home/orugu/Docker/Final_project_rss/docs/web_dashboard_api_spec.md
+/home/orugu/Docker/Final_project_rss/docs/web_dashboard_architecture.md
+/home/orugu/Docker/Final_project_rss/docs/web_dashboard_화면별기능및데이터설명.md
+/home/orugu/Docker/Final_project_rss/nginx/html/js/wed_dashboard/dashboard_app.js
+/home/orugu/Docker/Final_project_rss/nginx/html/js/wed_dashboard/dashboard_api.js
+/home/orugu/Docker/Final_project_rss/nginx/html/js/wed_dashboard/dashboard_state.js
+/home/orugu/Docker/Final_project_rss/nginx/html/js/wed_dashboard/dashboard_permissions.js
+/home/orugu/Docker/Final_project_rss/nginx/html/js/wed_dashboard/dashboard_session.js
+/home/orugu/Docker/Final_project_rss/nginx/html/js/wed_dashboard/dashboard_ui.js
+/home/orugu/Docker/Final_project_rss/nginx/html/js/wed_dashboard/dashboard_kpi.js
+/home/orugu/Docker/Final_project_rss/nginx/html/js/wed_dashboard/dashboard_charts.js
+/home/orugu/Docker/Final_project_rss/nginx/html/js/wed_dashboard/dashboard_detail_views.js
+/home/orugu/Docker/Final_project_rss/nginx/html/js/wed_dashboard/dashboard_worker.js
+/home/orugu/Docker/Final_project_rss/nginx/html/js/wed_dashboard/dashboard_qa.js
+/home/orugu/Docker/Final_project_rss/nginx/html/js/wed_dashboard/dashboard_manager.js
+/home/orugu/Docker/Final_project_rss/nginx/html/js/wed_dashboard/dashboard_promo.js
+/home/orugu/Docker/Final_project_rss/nginx/html/css/wed_dashboard/dashboard_style.css
+/home/orugu/Docker/Final_project_rss/nginx/html/css/wed_dashboard/dashboard_status.css
+/home/orugu/Docker/Final_project_rss/nginx/html/css/wed_dashboard/dashboard_worker.css
+/home/orugu/Docker/Final_project_rss/nginx/html/css/wed_dashboard/dashboard_qa.css
+/home/orugu/Docker/Final_project_rss/nginx/html/css/wed_dashboard/dashboard_manager.css
+/home/orugu/Docker/Final_project_rss/nginx/html/css/wed_dashboard/dashboard_promo.css
+/home/orugu/Docker/Final_project_rss/nginx/html/web_login.html
+/home/orugu/Docker/Final_project_rss/nginx/html/js/web_login/web_login.js
+/home/orugu/Docker/Final_project_rss/server_api/src/modules/dashboard/router.py
+/home/orugu/Docker/Final_project_rss/server_api/src/modules/dashboard/service.py
+/home/orugu/Docker/Final_project_rss/server_api/src/modules/dashboard/repository.py
+/home/orugu/Docker/Final_project_rss/server_api/src/modules/dashboard/schemas.py
+/home/orugu/Docker/Final_project_rss/server_api/src/modules/dashboard/db/model.py
+/home/orugu/Docker/Final_project_rss/server_api/src/modules/auth/router.py
+/home/orugu/Docker/Final_project_rss/server_api/src/modules/auth/db/schema.py
+/home/orugu/Docker/Final_project_rss/server_api/src/main.py
+/home/orugu/Docker/Final_project_rss/server_api/sql/wed_dashboard_schema.sql
+/home/orugu/Docker/Final_project_rss/nginx/conf.d/default.conf
+/home/orugu/Docker/Final_project_rss/server_api/pytest.ini

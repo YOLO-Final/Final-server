@@ -1,0 +1,6 @@
+ line_id | line_name | status | current_model_id 
+---------+-----------+--------+------------------
+       1 |           |        | 
+       2 |           |        | 
+(2 rows)
+

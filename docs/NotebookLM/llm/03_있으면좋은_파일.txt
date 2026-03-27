@@ -1,0 +1,86 @@
+NotebookLM 업로드용 보강 파일 목록
+목적: 핵심 설명을 보강하고 개념 자료, 부가 기능, 운영 화면 맥락을 더한다.
+
+1)
+파일 경로: /home/orugu/Docker/Final_project_rss/server_api/src/modules/llm/llm_media_api.py
+왜 이 분류에 들어가는지: STT/TTS/Image 기능 범위를 설명하는 근거다.
+활용 목적: 멀티모달 지원 범위, 외부 API 의존성 정리.
+실제 존재 여부: 확인됨
+짧은 비고: image API 존재가 곧 운영 사용 중이라는 뜻은 아님.
+
+2)
+파일 경로: /home/orugu/Docker/Final_project_rss/server_api/src/modules/llm/llm_question.py
+왜 이 분류에 들어가는지: 추천 질문 기능의 구현 범위와 fallback 구조를 보여 준다.
+활용 목적: 운영 편의 기능, 초기 사용자 유도 기능 설명.
+실제 존재 여부: 확인됨
+짧은 비고: 핵심 상담 기능보다 부가 기능 성격이 강함.
+
+3)
+파일 경로: /home/orugu/Docker/Final_project_rss/server_api/src/modules/llm/llm_result_api.py
+왜 이 분류에 들어가는지: 단일 프롬프트 처리 API 존재를 보여 준다.
+활용 목적: 구현 보유 기능과 운영 핵심 기능의 차이 설명.
+실제 존재 여부: 확인됨
+짧은 비고: 운영 UI 직접 호출 근거는 현재 미확인.
+
+4)
+파일 경로: /home/orugu/Docker/Final_project_rss/server_api/src/modules/llm/services/openai_service.py
+왜 이 분류에 들어가는지: OpenAI API 키 의존성과 최소 클라이언트 팩토리를 설명할 수 있다.
+활용 목적: 환경 변수, 운영 전제, 장애 조건 설명.
+실제 존재 여부: 확인됨
+짧은 비고: 실제 모델 호출은 다른 파일에도 분산됨.
+
+5)
+파일 경로: /home/orugu/Docker/Final_project_rss/nginx/html/auto.html
+왜 이 분류에 들어가는지: dashboard.js를 포함하는 운영 화면 셸 중 하나다.
+활용 목적: 화면 캡처 후보, 운영 맥락 설명.
+실제 존재 여부: 확인됨
+짧은 비고: 실제 LLM 위젯 존재 여부는 JS와 함께 봐야 함.
+
+6)
+파일 경로: /home/orugu/Docker/Final_project_rss/nginx/html/manual.html
+왜 이 분류에 들어가는지: dashboard.js를 로드하는 또 다른 운영 화면이다.
+활용 목적: 화면 맥락 보강.
+실제 존재 여부: 확인됨
+짧은 비고: 추가 발견 파일.
+
+7)
+파일 경로: /home/orugu/Docker/Final_project_rss/nginx/html/model.html
+왜 이 분류에 들어가는지: dashboard.js를 로드하는 화면 파일이다.
+활용 목적: 운영 화면 범위 보강.
+실제 존재 여부: 확인됨
+짧은 비고: 추가 발견 파일.
+
+8)
+파일 경로: /home/orugu/Docker/Final_project_rss/nginx/html/iot.html
+왜 이 분류에 들어가는지: dashboard.js를 로드하는 화면 파일이다.
+활용 목적: 운영 화면 범위 보강.
+실제 존재 여부: 확인됨
+짧은 비고: 추가 발견 파일.
+
+9)
+파일 경로: /home/orugu/Docker/Final_project_rss/docs/architecture/llm_architecture.d2
+왜 이 분류에 들어가는지: 현재 구현 중심의 상세 LLM 구조 설명 자료다.
+활용 목적: 구조 설명, 파일 간 관계 파악.
+실제 존재 여부: 확인됨
+짧은 비고: 개념도보다 실제 구현과 더 가깝지만 여전히 코드 우선.
+
+10)
+파일 경로: /home/orugu/Docker/Final_project_rss/docs/architecture/llm_architecture_sequence.puml
+왜 이 분류에 들어가는지: 질문 처리 시퀀스를 단계적으로 이해하는 데 유용하다.
+활용 목적: 처리 흐름 설명, 발표용 흐름 근거.
+실제 존재 여부: 확인됨
+짧은 비고: 시퀀스 요약용.
+
+11)
+파일 경로: /home/orugu/Docker/Final_project_rss/docs/architecture/발표용_기술반영_아키텍처.d2
+왜 이 분류에 들어가는지: 서비스 전체 안에서 LLM 관련 계층을 쉽게 설명하는 개념도다.
+활용 목적: 개념 아키텍처 설명.
+실제 존재 여부: 확인됨
+짧은 비고: 현재 구현과 동일하다고 단정하면 안 됨.
+
+12)
+파일 경로: /home/orugu/Docker/Final_project_rss/docs/architecture/발표용_사용자흐름_정돈.d2
+왜 이 분류에 들어가는지: 사용자 관점 흐름 자료다.
+활용 목적: 사용자 질문-응답 흐름 설명.
+실제 존재 여부: 확인됨
+짧은 비고: 개념 흐름도 성격이 강함.

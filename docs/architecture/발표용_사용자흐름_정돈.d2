@@ -1,0 +1,165 @@
+direction: right
+
+vars: {
+  user_fill: "#F7E7C6"
+  ui_fill: "#F3C24D"
+  api_fill: "#5C7CC4"
+  svc_fill: "#6E90D8"
+  ai_fill: "#4767B1"
+  tool_fill: "#F2C14E"
+  mem_fill: "#6B56B8"
+  db_fill: "#4CAF60"
+  text_light: "#FFFFFF"
+}
+
+title: "사용자 흐름으로 보는 AI 상담 구조"
+
+architecture: {
+  direction: down
+
+  main: {
+    direction: right
+
+    left_column: {
+      direction: down
+
+      user: "사용자" {
+        shape: person
+        style.fill: ${user_fill}
+      }
+
+      ui: "프론트엔드 화면" {
+        style.fill: ${ui_fill}
+      }
+    }
+
+    api: "FastAPI 요청 처리" {
+      style.fill: ${api_fill}
+      style.font-color: ${text_light}
+    }
+
+    service_column: {
+      direction: down
+
+      service_gate: "기능별 서비스" {
+        style.fill: ${api_fill}
+        style.font-color: ${text_light}
+      }
+
+      service_box: {
+        direction: down
+        style.stroke: "#8FA6E0"
+        style.fill: "#EEF3FF"
+
+        chat: "대화 처리" {
+          style.fill: ${svc_fill}
+          style.font-color: ${text_light}
+        }
+
+        knowledge: "지식 관리" {
+          style.fill: ${svc_fill}
+          style.font-color: ${text_light}
+        }
+
+        media: "음성·이미지" {
+          style.fill: ${svc_fill}
+          style.font-color: ${text_light}
+        }
+
+        recommend: "추천 질문" {
+          style.fill: ${svc_fill}
+          style.font-color: ${text_light}
+        }
+      }
+    }
+
+    ai_column: {
+      direction: down
+
+      answer: "AI 응답 생성" {
+        style.fill: ${ai_fill}
+        style.font-color: ${text_light}
+      }
+
+      ai_tools: {
+        direction: down
+        style.stroke: "#E2B541"
+        style.fill: "#FFF7E2"
+
+        openai: "OpenAI GPT-4o-mini" {
+          style.fill: ${tool_fill}
+        }
+
+        gemini: "Google Gemini 2.0 Flash" {
+          style.fill: ${tool_fill}
+        }
+
+        web: "Serper·Tavily" {
+          style.fill: ${tool_fill}
+        }
+
+        faiss_search: "FAISS" {
+          style.fill: ${tool_fill}
+        }
+      }
+    }
+
+    result: "응답 반환" {
+      style.fill: ${ui_fill}
+    }
+  }
+
+  storage_bar: {
+    direction: right
+
+    postgres: "PostgreSQL" {
+      shape: cylinder
+      style.fill: ${db_fill}
+      style.font-color: ${text_light}
+    }
+
+    files: "로컬 파일 저장소\nPDF·TXT·이미지" {
+      shape: cylinder
+      style.fill: ${db_fill}
+      style.font-color: ${text_light}
+    }
+
+    faiss_index: "FAISS 인덱스" {
+      shape: cylinder
+      style.fill: ${db_fill}
+      style.font-color: ${text_light}
+    }
+
+    memory: "프로세스 메모리" {
+      style.fill: ${mem_fill}
+      style.font-color: ${text_light}
+    }
+  }
+}
+
+architecture.main.left_column.user -> architecture.main.left_column.ui
+architecture.main.left_column.ui -> architecture.main.api
+architecture.main.api -> architecture.main.service_column.service_gate
+architecture.main.service_column.service_gate -> architecture.main.ai_column.answer
+architecture.main.ai_column.answer -> architecture.main.result
+architecture.main.result -> architecture.main.left_column.ui
+
+architecture.main.service_column.service_gate -> architecture.main.service_column.service_box.chat
+architecture.main.service_column.service_gate -> architecture.main.service_column.service_box.knowledge
+architecture.main.service_column.service_gate -> architecture.main.service_column.service_box.media
+architecture.main.service_column.service_gate -> architecture.main.service_column.service_box.recommend
+
+architecture.main.ai_column.ai_tools.openai -> architecture.main.ai_column.answer
+architecture.main.ai_column.ai_tools.gemini -> architecture.main.ai_column.answer
+architecture.main.ai_column.ai_tools.web -> architecture.main.ai_column.answer
+architecture.main.ai_column.ai_tools.faiss_search -> architecture.main.ai_column.answer
+
+architecture.storage_bar.files -> architecture.main.service_column.service_box.knowledge
+architecture.storage_bar.faiss_index -> architecture.main.ai_column.ai_tools.faiss_search
+architecture.storage_bar.memory -> architecture.main.service_column.service_box.chat
+architecture.storage_bar.postgres -> architecture.main.api
+
+style: {
+  font: "Pretendard"
+  text-transform: none
+}

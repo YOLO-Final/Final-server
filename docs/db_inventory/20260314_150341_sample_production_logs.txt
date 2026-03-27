@@ -1,0 +1,4 @@
+ log_id | line_id | model_id | produced_qty 
+--------+---------+----------+--------------
+(0 rows)
+

@@ -1,0 +1,431 @@
+/* Manager-only stylesheet.
+   - 관리자 탭 전용 레이아웃/반응형 규칙 모음
+   - OEE 비교, 운영 리스크, 즉시 조치, 미해결 알람 카드 배치를 담당한다
+   - 공통 카드/테이블/타이포 규칙은 dashboard_style.css에 남긴다 */
+
+.manager-section-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--muted);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.manager-section-label::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--border);
+}
+
+.manager-kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 18px;
+}
+
+.manager-chart-card {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.manager-chart-grid {
+  align-items: stretch;
+}
+
+.manager-ops-grid {
+  grid-template-columns: minmax(0, 1.02fr) minmax(280px, 0.88fr) minmax(0, 1.35fr);
+}
+
+.manager-chart-grid .manager-chart-area {
+  flex: 1 1 auto;
+}
+
+.manager-chart-grid .manager-chart-card:first-child .manager-oee-list {
+  flex: 1 1 auto;
+  overflow: auto;
+}
+
+.manager-oee-list {
+  display: grid;
+  gap: 12px;
+}
+
+.manager-oee-item {
+  display: grid;
+  grid-template-columns: 68px minmax(0, 1fr) 52px;
+  align-items: center;
+  gap: 10px;
+}
+
+.manager-oee-item__label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.manager-oee-item__track {
+  position: relative;
+  height: 16px;
+  border-radius: 5px;
+  background: var(--surface2);
+  overflow: hidden;
+  max-width: 190px;
+  width: 100%;
+  justify-self: start;
+}
+
+.manager-oee-item__fill {
+  height: 100%;
+  border-radius: 5px;
+}
+
+.manager-oee-item__fill.is-good {
+  background: #34D399;
+}
+
+.manager-oee-item__fill.is-warn {
+  background: #FB923C;
+}
+
+.manager-oee-item__fill.is-danger {
+  background: #F87171;
+}
+
+.manager-oee-item__target {
+  position: absolute;
+  top: -3px;
+  bottom: -3px;
+  width: 2px;
+  border-radius: 999px;
+  background: var(--accent);
+  opacity: 0.85;
+}
+
+.manager-oee-item__value {
+  font-size: clamp(11px, 0.95vw, 13px);
+  font-weight: 600;
+  font-family: var(--mono);
+  text-align: right;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.manager-oee-target-note {
+  margin-top: 10px;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.manager-card-title-nowrap {
+  white-space: nowrap;
+}
+
+.manager-chart-area {
+  height: 180px;
+}
+
+.manager-alarm-table-wrap {
+  overflow-x: auto;
+}
+
+.manager-action-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 10px;
+}
+
+.manager-action-grid .action-queue-item {
+  min-height: 0;
+  width: 100%;
+  padding: 8px 14px;
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface2);
+}
+
+.manager-action-grid .action-queue-item:last-child {
+  border-bottom: 1.5px solid var(--border);
+}
+
+.manager-action-grid .action-queue-item:hover {
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+}
+
+.manager-action-grid .aq-num {
+  min-width: 18px;
+  font-size: 20px;
+  line-height: 1.1;
+}
+
+.manager-action-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 2px;
+  min-width: 0;
+}
+
+.manager-action-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.manager-action-head .aq-count-inline {
+  flex: 0 0 auto;
+  white-space: nowrap;
+  line-height: 1.1;
+}
+
+.manager-action-sub {
+  white-space: normal;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  line-height: 1.25;
+}
+
+.modal-backdrop.open .modal-box:has(.manager-alarm-detail) {
+  width: min(920px, 96vw);
+}
+
+#detailModalContent .manager-alarm-detail {
+  display: grid;
+  gap: 14px;
+}
+
+.manager-alarm-detail__summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface2);
+  font-size: 14px;
+}
+
+.manager-alarm-detail__summary strong {
+  font-size: 18px;
+  color: var(--text);
+}
+
+.manager-alarm-detail__table-wrap {
+  max-height: 248px;
+  overflow: auto;
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.manager-alarm-detail__table-wrap .alarm-table {
+  min-width: 720px;
+}
+
+.manager-alarm-detail__table-wrap .alarm-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--surface);
+}
+
+.manager-alarm-detail__table-wrap .empty-msg {
+  padding: 18px 12px;
+  text-align: center;
+}
+
+body.is-manager-screen .manager-oee-item {
+  grid-template-columns: 64px minmax(0, 180px) minmax(48px, 56px);
+  gap: 8px;
+}
+
+body.is-manager-screen .manager-oee-item__label {
+  font-size: clamp(12px, 1vw, 13px);
+  white-space: nowrap;
+}
+
+body.is-manager-screen .manager-oee-item__track {
+  max-width: 180px;
+}
+
+body.is-manager-screen .manager-oee-item__value {
+  font-size: clamp(11px, 0.92vw, 12px);
+}
+
+@media (max-width: 1700px) {
+  body.is-manager-screen .manager-oee-item {
+    grid-template-columns: 60px minmax(0, 168px) minmax(46px, 54px);
+    gap: 7px;
+  }
+
+  body.is-manager-screen .manager-oee-item__track {
+    max-width: 168px;
+    height: 15px;
+  }
+}
+
+@media (max-width: 1450px) {
+  body.is-manager-screen .manager-oee-item {
+    grid-template-columns: 56px minmax(0, 152px) minmax(44px, 52px);
+    gap: 6px;
+  }
+
+  body.is-manager-screen .manager-oee-item__label {
+    font-size: 12px;
+  }
+
+  body.is-manager-screen .manager-oee-item__track {
+    max-width: 152px;
+    height: 14px;
+  }
+
+  body.is-manager-screen .manager-oee-item__value {
+    font-size: 11px;
+  }
+}
+
+@media (max-width: 1100px) {
+  .manager-ops-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .manager-kpi-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .manager-chart-area {
+    height: 168px;
+  }
+}
+
+@media (max-width: 1500px) {
+  .manager-chart-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .manager-chart-grid > :last-child {
+    grid-column: 1 / -1;
+  }
+
+  .manager-ops-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .manager-ops-grid > :last-child {
+    grid-column: 1 / -1;
+  }
+
+  .manager-card-title-nowrap {
+    font-size: 14px;
+  }
+}
+
+@media (max-width: 1280px) {
+  .manager-chart-grid,
+  .manager-ops-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .manager-chart-grid > :last-child,
+  .manager-ops-grid > :last-child {
+    grid-column: auto;
+  }
+
+  body.is-manager-screen .manager-oee-item {
+    grid-template-columns: 58px minmax(0, 1fr) minmax(44px, 52px);
+    gap: 8px;
+  }
+
+  body.is-manager-screen .manager-oee-item__track {
+    max-width: 100%;
+  }
+}
+
+@media (max-width: 640px) {
+  .manager-action-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .manager-action-grid .action-queue-item {
+    min-height: 0;
+  }
+
+  .manager-action-head {
+    grid-template-columns: auto minmax(0, 1fr);
+    gap: 8px;
+  }
+
+  .manager-action-head .aq-count-inline {
+    grid-column: 2 / 3;
+    justify-self: end;
+  }
+}
+
+@media (max-width: 640px) {
+  .manager-action-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (min-width: 1281px) {
+  body.is-manager-screen .manager-oee-item {
+    grid-template-columns: 72px minmax(0, 1fr) minmax(54px, 68px);
+    gap: 10px;
+  }
+
+  body.is-manager-screen .manager-oee-item__track {
+    max-width: none;
+    width: 100%;
+    height: 16px;
+  }
+}
+
+@media (min-width: 1281px) {
+  .manager-chart-grid {
+    align-items: stretch;
+  }
+
+  .manager-chart-grid .manager-chart-card {
+    height: 100%;
+    min-height: 320px;
+  }
+
+  .manager-chart-grid .manager-chart-area {
+    min-height: 180px;
+  }
+
+  .manager-chart-grid .manager-oee-list {
+    flex: 1 1 auto;
+    min-height: 180px;
+  }
+
+  .manager-chart-grid .manager-oee-target-note {
+    margin-top: auto;
+  }
+}
+
+@media (max-width: 1024px) {
+  body.is-manager-screen .manager-kpi-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+  }
+
+  body.is-manager-screen .manager-kpi-grid .kpi-card {
+    min-height: 132px;
+  }
+}
+
+@media (max-width: 420px) {
+  body.is-manager-screen .manager-kpi-grid {
+    grid-template-columns: 1fr;
+  }
+}

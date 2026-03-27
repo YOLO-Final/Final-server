@@ -1,0 +1,54 @@
+@startuml
+title Final Project RSS - LLM Chat Request Sequence
+
+actor User
+participant "Dashboard UI\nnginx/html/js/dashboard.js" as FE
+participant "Nginx\n/api reverse proxy" as Nginx
+participant "FastAPI\nsrc/main.py + api/v1/router.py" as API
+participant "LLM Router\nsrc/modules/llm/router.py" as Router
+participant "Chat API\nllm_chat_api.py" as ChatAPI
+participant "Knowledge Service\nknowledge_service.py" as Knowledge
+participant "CSAgent\nsample/agent.py" as Agent
+participant "OpenAI Service\nopenai_service.py" as OpenAIService
+database "Knowledge Folder\nLLM_KNOWLEDGE_PATH" as KB
+collections "In-memory State\nmemory / caches / web history" as Memory
+participant "Serper / Tavily" as Search
+participant "OpenAI APIs" as OpenAI
+
+User -> FE : 질문 입력
+FE -> Nginx : POST /api/v1/llm/chat
+Nginx -> API : proxy /api/v1/llm/chat
+API -> Router : route match
+Router -> ChatAPI : chat()
+
+ChatAPI -> Knowledge : ensure_knowledge_current()
+Knowledge -> KB : fingerprint / read files
+Knowledge -> Agent : set_local_knowledge_docs()\nset retriever if available
+
+ChatAPI -> Agent : get_ai_streaming_response()
+Agent -> Memory : load session history
+Agent -> Agent : build knowledge context
+
+opt fresh or factual query
+  Agent -> Search : Serper / Tavily search
+  Search --> Agent : snippets + links
+end
+
+Agent -> Agent : build_prompt(memory, knowledge, web)
+
+alt langchain provider available
+  Agent -> OpenAI : stream chat completion
+else direct OpenAI fallback
+  Agent -> OpenAIService : get_openai_client()
+  OpenAIService -> OpenAI : create client with OPENAI_API_KEY
+  Agent -> OpenAI : stream chat completion
+end
+
+OpenAI --> Agent : streamed text chunks
+Agent -> Agent : sanitize + append source links
+Agent -> Memory : store user/assistant turns
+Agent --> ChatAPI : yield chunks
+ChatAPI --> FE : StreamingResponse(text/plain)
+FE --> User : 실시간 답변 표시 + 이후 TTS 요청 가능
+
+@enduml

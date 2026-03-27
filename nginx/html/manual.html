@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Manual Test | Inspection Dashboard</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Fraunces:wght@500;700&family=Space+Grotesk:wght@400;500;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/css/ui.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <section class="top-zone">
+        <nav class="side-menu" aria-label="Main mode menu">
+          <button class="menu-btn" data-mode="auto">Auto Inspection</button>
+          <button class="menu-btn" data-mode="configuration">Configuration</button>
+          <button class="menu-btn" data-mode="iot">IoT Setting</button>
+          <button class="menu-btn" data-mode="result">Result</button>
+          <button class="menu-btn" id="logout-btn" type="button">Log Out</button>
+        </nav>
+
+        <section class="work-area" aria-live="polite">
+
+
+          <div class="manual-panel" id="manual-panel" hidden>
+            <div class="camera-stage" role="img" aria-label="Camera or image area">
+              <div class="camera-overlay" aria-hidden="true">
+                <span class="camera-overlay-dot"></span>
+                <span>LIVE OVERLAY</span>
+              </div>
+              <p>CAM or Image</p>
+            </div>
+
+            <aside class="control-stage" aria-label="Manual controls">
+              <button class="action-btn" type="button">Start</button>
+              <button class="action-btn" type="button">Stop</button>
+              <button class="action-btn" type="button">Load</button>
+              <div class="status-box">
+                <p>OK : ??</p>
+                <p>NG : ??</p>
+              </div>
+            </aside>
+          </div>
+        </section>
+      </section>
+
+      <section class="chatbot-bar">
+        <h2>ChatBot Display</h2>
+
+        <form class="ask-form" aria-label="Ask input form">
+          <button
+            class="ask-voice-btn ask-upload-btn"
+            type="button"
+            title="Knowledge file upload"
+            aria-label="Knowledge file upload"
+          >
+            +
+          </button>
+          <input
+            class="ask-upload-input"
+            type="file"
+            accept=".txt,.pdf,.png,.jpg,.jpeg,.webp,.bmp,.gif,image/*"
+            hidden
+          />
+          <input
+            class="ask-input"
+            type="text"
+            name="question"
+            placeholder="Type your question..."
+            autocomplete="off"
+          />
+          <button class="ask-send-btn" type="submit">Send</button>
+        </form>
+      </section>
+    </main>
+
+    <script src="/js/dashboard.js"></script>
+  </body>
+</html>

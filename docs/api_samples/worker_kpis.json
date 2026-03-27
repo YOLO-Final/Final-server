@@ -1,0 +1,54 @@
+{
+  "screen": "worker",
+  "screenId": "SCR-001",
+  "dataMode": "mock",
+  "effectiveAt": "2026-03-14T15:00:00+09:00",
+  "updatedAt": "2026-03-14T15:00:10+09:00",
+  "kpis": {
+    "items": [
+      {
+        "key": "worker_recent_10m_ng",
+        "label": "최근 10분 NG",
+        "value": 12,
+        "unit": "건",
+        "sourceType": "actual"
+      },
+      {
+        "key": "worker_total_produced",
+        "label": "누적 생산량",
+        "value": 13200,
+        "unit": "pcs",
+        "sourceType": "actual"
+      },
+      {
+        "key": "worker_achievement",
+        "label": "목표 달성률",
+        "value": 66.0,
+        "unit": "%",
+        "sourceType": "derived"
+      },
+      {
+        "key": "worker_attention_count",
+        "label": "현재 확인 필요 건수",
+        "value": "계약 대기",
+        "unit": "",
+        "sourceType": "derived",
+        "contractPending": true,
+        "disabled": true
+      }
+    ]
+  },
+  "insights": {
+    "items": [
+      {
+        "key": "worker_ml_hint",
+        "label": "ML 이상 징후",
+        "value": "라인 C 10분 내 NG 증가 위험",
+        "sourceType": "simulated",
+        "reasonSummary": "최근 10분 NG 상승 패턴",
+        "confidence": 0.71,
+        "validUntil": "2026-03-14T15:10:00+09:00"
+      }
+    ]
+  }
+}

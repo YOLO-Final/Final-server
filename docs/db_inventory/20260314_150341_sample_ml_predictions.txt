@@ -1,0 +1,4 @@
+ pred_id | line_id | pred_type | predicted_value | predicted_at | valid_until 
+---------+---------+-----------+-----------------+--------------+-------------
+(0 rows)
+

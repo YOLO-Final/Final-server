@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Inspection UI Sample</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Fraunces:wght@500;700&family=Space+Grotesk:wght@400;500;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/css/ui.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <section class="top-zone">
+        <nav class="side-menu" aria-label="Main mode menu">
+          <button class="menu-btn" data-mode="auto">Auto Inspection</button>
+          <button class="menu-btn" data-mode="configuration">Configuration</button>
+          <button class="menu-btn" data-mode="iot">IoT Setting</button>
+          <button class="menu-btn" data-mode="result">Result</button>
+          <button class="menu-btn" id="logout-btn" type="button">Log Out</button>
+        </nav>
+
+        <section class="work-area" aria-live="polite">
+          <div class="simple-panel" id="simple-panel"></div>
+
+          <div class="manual-panel" id="manual-panel" hidden>
+            <div class="camera-stage" role="img" aria-label="Camera or image area">
+              <div class="camera-overlay" aria-hidden="true">
+                <span class="camera-overlay-dot"></span>
+                <span>LIVE OVERLAY</span>
+              </div>
+              <p>CAM or Image</p>
+            </div>
+
+            <aside class="control-stage" aria-label="Manual controls">
+              <button class="action-btn" type="button">Start</button>
+              <button class="action-btn" type="button">Stop</button>
+              <button class="action-btn" type="button">Load</button>
+              <div class="status-box">
+                <p>OK : ??</p>
+                <p>NG : ??</p>
+              </div>
+            </aside>
+          </div>
+        </section>
+      </section>
+
+      <section class="chatbot-bar">
+        <h2>ChatBot Display</h2>
+      </section>
+
+      <section class="ask-bar">
+        
+      </section>
+    </main>
+
+    <script src="/js/ui.js"></script>
+  </body>
+</html>
